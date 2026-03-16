@@ -1,0 +1,162 @@
+﻿@startuml
+
++class	Server <<static>>{
+	 + void Init(Server.Config config)
+	 - Client?[]? clients
+	 - Socket?[]? sockets
+	 + Config? Config <<get; private set>>
+	 + MessageBus? MessageBus <<get; private set>>
+	 + {method} int ConnectedClients <<get>>
+	 - int FindFreeIndex()
+	 - int FindClient(IPEndPoint address)
+	 - bool IsConnected(int index)
+	 + bool PrepMessage(IMessage message)
+	 + bool PrepImportantMessage(IMessage message)
+	 + void PollEvents()
+}
+
+- class JitterBuffer <<static>>
+Server --o JitterBuffer
+
+note right of Server::PrepMessage
+Since we send 1024 bytes at 
+end note
+
+note right of Server::Init
+Throws InvalidOperationException
+on subsequent calls
+end note
+
++record	"Server.Config" as Server_Config{
+	bool IsHost
+	int MaxClients = 4
+	int PacketLength = 1024
+}
+Server --* "1" Server_Config
+
++class	Client {
+	+ ClientState State <<get; private init>>
+	+ IPEndPoint Address <<get; private init>>
+}
+~enum	ClientState {
+	Disconnecting
+	Connecting
+	Connected
+}
+Client --* "1" ClientState
+Server --o "0..*" Client
+
+package Sockets {
+~class	Socket <<sealed>>{
+	+ ushort Port <<get; private set>>
+	+ IPEndPoint? Outbound <<get; set>>
+	- Socket.Handle handle
+	+ Socket()
+	+ Socket(ushort port)
+	+ void SendTo(IPEndPoint address, byte[] data)
+	+ void Send(byte[] data)
+	+ byte[]? RecieveFrom(IPEndPoint address, int maxSize)
+	+ byte[]? Recieve(int maxSize)
+	{method} + bool IsOpen <<get; private set>>
+	+ void Open(ushort port)
+	+ void Close()
+	- void AddRef() <<static>>
+	- void Release() <<static>>
+}
+
+-class "Socket.Handle" as Socket_Handle
+object "Unmanaged Code" as Native{
+{abstract} P/Invoke
+}
+}
+abstract class SafeHandle
+Socket_Handle --|> SafeHandle
+
+Socket --* "1" Socket_Handle
+
+interface IDisposable
+
+
+Socket	--|> Native
+Socket_Handle -r-|> Native
+Socket ..|> IDisposable
+
+Server --* "0..*" Socket
+
+package Protocols {
++ annotation SchemaAttribute <<sealed>>{
+	- ushort key
+	+ {method} ushort Key <<get>>
+}
+
++ annotation IgnoreAttribute <<sealed>>
+
++ annotation FixedLengthAttribute <<sealed>>{
+	- uint length
+	+ {method} uint Length <<get>>
+}
+
++ annotation FixedElementSizeAttribute <<sealed>>{
+	- uint elemSize
+	+ {method} uint ElemSize <<get>>
+}
+
++ annotation OverrideIndexAttribute <<sealed>>{
+	- int index
+	+ {method} int Index <<get>>
+}
+
++ annotation ProtocolAttribute <<sealed>>
+
+~ class SchemaGenerator <<sealed>>
+stereotype "<i>IProtocol" as IProtocol <<partial interface>>{
+	+ {abstract} ushort Key <<get>>
+	+ ushort GetKey<T>() <<where T : class, IProtocol>> <<static>>
+	+ DeserializationResult Deserialize(MemoryStream stream, out IProtocol? schema) <<static>>
+	+ {abstract} void Serialize(MemoryStream stream)
+}
+SchemaGenerator -> IProtocol : Generates
+
+stereotype Schema <<partial class>>
+SchemaGenerator -> Schema : Generates
+SchemaAttribute }. Schema
+
+ProtocolAttribute }.. IProtocol
+Schema ..|> IProtocol 
+	
+note "Examples" as examples
+examples .u.|> Schema
+examples .|> IProtocol
+}
+
+interface IIncrementalGenerator
+
+SchemaGenerator ..|> IIncrementalGenerator
+
++ interface IMessage <<Protocol(1024)>>{
+
+}
+ProtocolAttribute }.. IMessage
+
++ class MessageBus <<static>>{
+	- Dictionary<ushort, HashSet<MessageEvent>> events
+	+ MessageEvent<T> Get<T>() <<where T : class, IMessage>>
+}
+
++ dataclass "void MessageCallback <where T : \n class, IMessage>" as MessageCallback{
+	Client sender
+	T message
+}
+
++ class MessageEvent<where T :\nclass, IMessage> <<sealed>>{
+	+ void Subscribe(MessageCallback<T> callback)
+	~ void Publish(Client sender, T message)
+}
+
+Server --* "1" MessageBus
+MessageBus .. IMessage
+MessageEvent -- IMessage
+MessageBus --o "0..*" MessageEvent
+MessageEvent --o "0..*" MessageCallback
+
+@enduml
