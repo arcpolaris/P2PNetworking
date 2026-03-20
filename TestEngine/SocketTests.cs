@@ -37,15 +37,7 @@ public sealed class SocketTests
 
         using CancellationTokenSource cts = new();
 
-        var poll = Task.Run(async () =>
-        {
-            while (!cts.IsCancellationRequested)
-            {
-                sock1.PollEvents(); 
-                sock2.PollEvents();
-                await Task.Delay(25);
-            }
-        });
+        var poll = Task.WhenAll(sock1.StartPolling(cts.Token), sock2.StartPolling(cts.Token));
 
         var io = Task.Run(async () =>
         {
@@ -68,14 +60,15 @@ public sealed class SocketTests
 
     [TestMethod]
     [Priority(0)]
-    [DataRow(33333, "209.210.62.36")]
+    [DataRow(33335, "209.210.62.36")]
     public async Task P2PLoopback(int port, string remote)
     {
+		Random rnd = new(port);
 		List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
 		{
-			byte[] bytes = new byte[Random.Shared.Next(1, 1024)];
+			byte[] bytes = new byte[rnd.Next(1, 1024)];
 			bytes[0] = (byte)i;
-			Random.Shared.NextBytes((new Span<byte>(bytes))[1..]);
+			rnd.NextBytes((new Span<byte>(bytes))[1..]);
 			return bytes;
 		})];
 		List<byte[]> garbageOut = [];
@@ -104,14 +97,7 @@ public sealed class SocketTests
 
 		using CancellationTokenSource cts = new();
 
-		var poll = Task.Run(async () =>
-		{
-			while (!cts.IsCancellationRequested)
-			{
-				sock.PollEvents();
-				await Task.Delay(25);
-			}
-		});
+        var poll = sock.StartPolling(cts.Token);
 
 		var io = Task.Run(async () =>
 		{

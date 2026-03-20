@@ -62,21 +62,15 @@ public class P2PSocket : IDisposable
 		_socket.Send(data);
 	}
 
-	public void PollEvents()
+	public async Task StartPolling(CancellationToken ct)
 	{
-		while (true)
+		while (!ct.IsCancellationRequested)
 		{
 			byte[] buffer = new byte[max_packet_size];
-			try
-			{
-				int read = _socket.Receive(buffer);
-				ArraySegment<byte> segment = new(buffer, 0, read);
-				OnMessageRecieved?.Invoke(this, new([.. segment]));
-			}
-			catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
-			{
-				break;
-			}
+			int read = await _socket.ReceiveAsync(buffer, SocketFlags.None);
+			if (read <= 0) break;
+			ArraySegment<byte> segment = new(buffer, 0, read);
+			OnMessageRecieved?.Invoke(this, new([.. segment]));
 		}
 	}
 
