@@ -60,7 +60,7 @@ public sealed class SocketTests
     [TestMethod]
     [Priority(0)]
     [DataRow(33335, "209.210.62.36")]
-    //[DataRow(33335, "174.277.49.79)]
+    //[DataRow(33335, "174.277.49.79")]
     public async Task P2PLoopback(int port, string remote)
     {
 		Random rnd = new(port);
