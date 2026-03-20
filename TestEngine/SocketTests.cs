@@ -65,4 +65,60 @@ public sealed class SocketTests
             Assert.IsTrue(First.SequenceEqual(Second));
         }
     }
+
+    [TestMethod]
+    [TestCategory("Manual")]
+    [Priority(0)]
+    public async Task P2PLoopback()
+    {
+		using HttpClient client = new();
+		string ip = await client.GetStringAsync("https://api.ipify.org");
+		Console.WriteLine($"Public IP: {ip}");
+
+        using P2PSocket sock = new();
+
+        sock.OnMessageRecieved += (_, args) => Console.WriteLine(Encoding.UTF8.GetString(args.Data));
+
+        Console.Write("Local port: ");
+        if (!int.TryParse(Console.ReadLine(), out int localPort)) Assert.Inconclusive();
+
+        sock.Bind(localPort);
+
+        Console.Write("Remote EP: ");
+        if (!IPEndPoint.TryParse(Console.ReadLine() ?? "", out var remoteEP)) Assert.Inconclusive();
+
+        Console.WriteLine($"{ip}:{localPort} ---> {remoteEP}");
+        Console.WriteLine("Press enter to begin uplink");
+        Console.ReadLine();
+
+        bool success = await sock.Uplink(remoteEP, 10);
+        Assert.IsTrue(success);
+
+		using CancellationTokenSource cts = new();
+
+		var poll = Task.Run(async () =>
+		{
+			while (!cts.IsCancellationRequested)
+			{
+				sock.PollEvents();
+				await Task.Delay(25);
+			}
+		});
+
+		var io = Task.Run(() =>
+		{
+			while (!cts.IsCancellationRequested)
+            {
+                string? s = Console.ReadLine();
+                if (string.IsNullOrEmpty(s))
+                {
+                    cts.Cancel();
+                    break;
+                }
+                sock.Send(Encoding.UTF8.GetBytes(s));
+            }
+		});
+
+		await Task.WhenAll(poll, io);
+	}
 }
