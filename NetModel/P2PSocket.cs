@@ -67,7 +67,11 @@ public class P2PSocket : IDisposable
 		while (!ct.IsCancellationRequested)
 		{
 			byte[] buffer = new byte[max_packet_size];
-			int read = await _socket.ReceiveAsync(buffer, SocketFlags.None);
+			int read;
+			try
+			{
+				read = await _socket.ReceiveAsync(buffer, SocketFlags.None, ct);
+			} catch (OperationCanceledException) { break; }
 			if (read <= 0) break;
 			ArraySegment<byte> segment = new(buffer, 0, read);
 			OnMessageRecieved?.Invoke(this, new([.. segment]));
