@@ -37,26 +37,6 @@ public class P2PSocket : IDisposable
 	public IPEndPoint LocalEndPoint => (IPEndPoint)_socket.LocalEndPoint;
 	public IPEndPoint RemoteEndPoint => (IPEndPoint)_socket.RemoteEndPoint;
 
-	public async Task<bool> Uplink(IPEndPoint ep, float timeout)
-	{
-		using CancellationTokenSource cts = new();
-		SocketAsyncEventArgs e = new()
-		{
-			RemoteEndPoint = ep,
-		};
-		e.Completed += (_, _) => cts.Cancel();
-		_socket.ConnectAsync(e);
-		await Task.Delay((int)(1000 * timeout), cts.Token);
-		cts.Cancel();
-		if (!_socket.Connected)
-		{
-			Socket.CancelConnectAsync(e);
-			return false;
-		}
-
-		return true;
-	}
-
 	public void Send(ArraySegment<byte> data)
 	{
 		_socket.Send(data);
@@ -65,6 +45,25 @@ public class P2PSocket : IDisposable
 	public async Task SendAsync(ArraySegment<byte> data)
 	{
 		await _socket.SendAsync(data, SocketFlags.None);
+	}
+
+	public void SetRemote(IPEndPoint ep)
+	{
+		_socket.Connect(ep);
+	}
+
+	public async Task HolePunch(CancellationToken ct)
+	{
+		byte[] probe = "punch"u8.ToArray();
+
+		while (!ct.IsCancellationRequested)
+		{
+			try
+			{
+				await _socket.SendAsync(probe, SocketFlags.None, ct);
+			} catch (OperationCanceledException) { break; }
+			await Task.Delay(250, ct);
+		}
 	}
 
 	public async Task StartPolling(CancellationToken ct)

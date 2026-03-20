@@ -28,10 +28,9 @@ public sealed class SocketTests
 
         sock1.Bind(33333);
         sock2.Bind(33334);
-        var u1 = sock1.Uplink(new IPEndPoint(IPAddress.Loopback, 33334), 3f);
-        var u2 = sock2.Uplink(new IPEndPoint(IPAddress.Loopback, 33333), 3f);
+        sock1.SetRemote(new IPEndPoint(IPAddress.Loopback, 33334));
+        sock2.SetRemote(new IPEndPoint(IPAddress.Loopback, 33333));
 
-        Assert.IsTrue((await Task.WhenAll(u1, u2)).All(x => x));
         Assert.AreEqual(sock1.LocalEndPoint, sock2.RemoteEndPoint);
         Assert.AreEqual(sock2.LocalEndPoint, sock1.RemoteEndPoint);
 
@@ -61,6 +60,7 @@ public sealed class SocketTests
     [TestMethod]
     [Priority(0)]
     [DataRow(33335, "209.210.62.36")]
+    //[DataRow(33335, "174.277.49.79)]
     public async Task P2PLoopback(int port, string remote)
     {
 		Random rnd = new(port);
@@ -79,7 +79,12 @@ public sealed class SocketTests
 
         using P2PSocket sock = new();
 
-        sock.OnMessageRecieved += (_, args) => garbageOut.Add(args.Data);
+        sock.OnMessageRecieved += (_, args) =>
+        {
+            lock(garbageOut)
+            garbageOut.Add(args.Data);
+            
+        };
 
         Debug.WriteLine($"Local port: {port}");
 
@@ -91,28 +96,35 @@ public sealed class SocketTests
 
         Debug.WriteLine($"{ip}:{port} ---> {remoteEP}");
 
-        bool success = await sock.Uplink(remoteEP, 20);
-        Assert.IsTrue(success);
-        Debug.WriteLine("Uplink sucess");
+        sock.SetRemote(remoteEP);
 
-		using CancellationTokenSource cts = new();
+        using (CancellationTokenSource cts = new())
+        {
+            cts.CancelAfter(10000);
+            await sock.HolePunch(cts.Token);
+            Debug.WriteLine("Done punching");
+        }
 
-        var poll = sock.StartPolling(cts.Token);
 
-		var io = Task.Run(async () =>
-		{
-			while (!cts.IsCancellationRequested)
+        using (CancellationTokenSource cts = new())
+        {
+            var poll = sock.StartPolling(cts.Token);
+
+            var io = Task.Run(async () =>
             {
-				foreach (var buff in garbageIn)
-				{
-					sock.Send(buff);
-					await Task.Delay(50);
-				}
-				cts.CancelAfter(1000);
-            }
-		});
+                while (!cts.IsCancellationRequested)
+                {
+                    foreach (var buff in garbageIn)
+                    {
+                        sock.Send(buff);
+                        await Task.Delay(50);
+                    }
+                    cts.CancelAfter(1000);
+                }
+            });
 
-		await Task.WhenAll(poll, io);
+		    await Task.WhenAll(poll, io);
+        }
 
 		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
 		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
