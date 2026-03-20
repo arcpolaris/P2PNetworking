@@ -67,32 +67,40 @@ public sealed class SocketTests
     }
 
     [TestMethod]
-    [TestCategory("Manual")]
     [Priority(0)]
-    public async Task P2PLoopback()
+    [DataRow(33333, "209.210.62.36")]
+    public async Task P2PLoopback(int port, string remote)
     {
+		List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
+		{
+			byte[] bytes = new byte[Random.Shared.Next(1, 1024)];
+			bytes[0] = (byte)i;
+			Random.Shared.NextBytes((new Span<byte>(bytes))[1..]);
+			return bytes;
+		})];
+		List<byte[]> garbageOut = [];
+
 		using HttpClient client = new();
 		string ip = await client.GetStringAsync("https://api.ipify.org");
-		Console.WriteLine($"Public IP: {ip}");
+		Debug.WriteLine($"Public IP: {ip}");
 
         using P2PSocket sock = new();
 
         sock.OnMessageRecieved += (_, args) => Console.WriteLine(Encoding.UTF8.GetString(args.Data));
 
-        Console.Write("Local port: ");
-        if (!int.TryParse(Console.ReadLine(), out int localPort)) Assert.Inconclusive();
+        Debug.WriteLine($"Local port: {port}");
 
-        sock.Bind(localPort);
+        sock.Bind(port);
 
-        Console.Write("Remote EP: ");
-        if (!IPEndPoint.TryParse(Console.ReadLine() ?? "", out var remoteEP)) Assert.Inconclusive();
+        IPEndPoint remoteEP = new(IPAddress.Parse(remote), port);
 
-        Console.WriteLine($"{ip}:{localPort} ---> {remoteEP}");
-        Console.WriteLine("Press enter to begin uplink");
-        Console.ReadLine();
+        Debug.WriteLine($"Remote EP: {remoteEP}");
 
-        bool success = await sock.Uplink(remoteEP, 10);
+        Debug.WriteLine($"{ip}:{port} ---> {remoteEP}");
+
+        bool success = await sock.Uplink(remoteEP, 20);
         Assert.IsTrue(success);
+        Debug.WriteLine("Uplink sucess");
 
 		using CancellationTokenSource cts = new();
 
@@ -105,20 +113,25 @@ public sealed class SocketTests
 			}
 		});
 
-		var io = Task.Run(() =>
+		var io = Task.Run(async () =>
 		{
 			while (!cts.IsCancellationRequested)
             {
-                string? s = Console.ReadLine();
-                if (string.IsNullOrEmpty(s))
-                {
-                    cts.Cancel();
-                    break;
-                }
-                sock.Send(Encoding.UTF8.GetBytes(s));
+				foreach (var buff in garbageIn)
+				{
+					sock.Send(buff);
+					await Task.Delay(50);
+				}
+				cts.CancelAfter(1000);
             }
 		});
 
 		await Task.WhenAll(poll, io);
+
+		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
+		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
+		{
+			Assert.IsTrue(First.SequenceEqual(Second));
+		}
 	}
 }
