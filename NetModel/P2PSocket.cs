@@ -62,6 +62,11 @@ public class P2PSocket : IDisposable
 		_socket.Send(data);
 	}
 
+	public async Task SendAsync(ArraySegment<byte> data)
+	{
+		await _socket.SendAsync(data, SocketFlags.None);
+	}
+
 	public async Task StartPolling(CancellationToken ct)
 	{
 		while (!ct.IsCancellationRequested)

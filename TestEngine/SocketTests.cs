@@ -79,7 +79,7 @@ public sealed class SocketTests
 
         using P2PSocket sock = new();
 
-        sock.OnMessageRecieved += (_, args) => Console.WriteLine(Encoding.UTF8.GetString(args.Data));
+        sock.OnMessageRecieved += (_, args) => garbageOut.Add(args.Data);
 
         Debug.WriteLine($"Local port: {port}");
 
