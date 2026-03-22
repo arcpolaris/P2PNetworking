@@ -58,12 +58,24 @@ public sealed class SocketTests
     }
 
     [TestMethod]
-    [Priority(0)]
-    [DataRow(33335, "209.210.62.36")]
-    //[DataRow(33335, "174.277.49.79")]
-    public async Task P2PLoopback(int port, string remote)
+    public async Task STUN()
     {
-		Random rnd = new(port);
+        var ip = await Helpers.GetPublicIP();
+        using P2PSocket sock = new();
+        sock.Bind(33338);
+        var ep = await sock.STUN();
+
+        Debug.WriteLine(ep.ToString());
+        Assert.AreEqual(ip, ep.Address);
+    }
+
+    [TestMethod]
+    [Priority(0)]
+    [DataRow(676767, 33335, "209.210.62.36", 44444)]
+    //[DataRow(676767, 33335, "174.277.49.79", 44444)]
+    public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)
+    {
+		Random rnd = new(seed);
 		List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
 		{
 			byte[] bytes = new byte[rnd.Next(1, 1024)];
@@ -73,30 +85,25 @@ public sealed class SocketTests
 		})];
 		List<byte[]> garbageOut = [];
 
-		using HttpClient client = new();
-		string ip = await client.GetStringAsync("https://api.ipify.org");
-		Debug.WriteLine($"Public IP: {ip}");
-
         using P2PSocket sock = new();
+
+        sock.Bind(localPort);
+        Debug.WriteLine($"Local port: {localPort}");
+
+        IPEndPoint publicEP = await sock.STUN();
 
         sock.OnMessageRecieved += (_, args) =>
         {
             lock(garbageOut)
             garbageOut.Add(args.Data);
-            
         };
 
-        Debug.WriteLine($"Local port: {port}");
 
-        sock.Bind(port);
-
-        IPEndPoint remoteEP = new(IPAddress.Parse(remote), port);
+        IPEndPoint remoteEP = new(IPAddress.Parse(remoteAddr), remotePort);
 
         Debug.WriteLine($"Remote EP: {remoteEP}");
-
-        Debug.WriteLine($"{ip}:{port} ---> {remoteEP}");
-
         sock.SetRemote(remoteEP);
+        Debug.WriteLine($"{publicEP} ---> {remoteEP}");
 
         using (CancellationTokenSource cts = new())
         {

@@ -9,10 +9,10 @@ using System.Threading.Channels;
 using System.Diagnostics;
 
 namespace NetModel;
-public class P2PSocket : IDisposable
+public partial class P2PSocket : IDisposable
 {
 	const int max_packet_size = 1024;
-	Socket _socket;
+	internal Socket _socket;
 
 	public P2PSocket()
 	{
@@ -61,8 +61,8 @@ public class P2PSocket : IDisposable
 			try
 			{
 				await _socket.SendAsync(probe, SocketFlags.None, ct);
+				await Task.Delay(250, ct);
 			} catch (OperationCanceledException) { break; }
-			await Task.Delay(250, ct);
 		}
 	}
 
