@@ -115,25 +115,24 @@ public sealed class SocketTests
         
         var poll = sock.StartPolling(cts2.Token);
 
-        await punch;
+        await Task.Delay(5000);
 
         var io = Task.Run(async () =>
         {
-            while (!cts2.IsCancellationRequested)
+            
+            foreach (var buff in garbageIn)
             {
-                foreach (var buff in garbageIn)
-                {
-                    sock.Send(buff);
-                    await Task.Delay(50);
-                }
-                cts2.CancelAfter(1000);
+                sock.Send(buff);
+                await Task.Delay(50);
             }
+
+            await Task.Delay(1000);
+
+            cts2.Cancel();
         });
 
-		await Task.WhenAll(poll, io);
+		await Task.WhenAll(poll, io, punch);
         
-
-        await Task.Delay(10000);
 
 		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
 		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
