@@ -67,6 +67,8 @@ public static class Helpers
 		if (reader.ReadByte() != 0x00) throw new Exception("Required zero");
 		if (reader.ReadByte() != 0x01) throw new Exception("IPv4 required");
 		ushort port = reader.ReadUInt16();
+		port = (ushort)((port << 8) | (port >> 8));
+		
 		uint address = reader.ReadUInt32();
 
 		byte[] addressBytes = BitConverter.GetBytes(address);

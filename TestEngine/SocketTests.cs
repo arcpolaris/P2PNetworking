@@ -71,8 +71,8 @@ public sealed class SocketTests
 
     [TestMethod]
     [Priority(0)]
-    [DataRow(676767, 33335, "209.210.62.36", 44444)]
-    //[DataRow(676767, 33335, "174.277.49.79", 44444)]
+    [DataRow(676767, 33335, "67.182.146.214", 33335)]
+    //[DataRow(676767, 33335, "174.277.49.79", 33338)]
     public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)
     {
 		Random rnd = new(seed);
@@ -91,6 +91,7 @@ public sealed class SocketTests
         Debug.WriteLine($"Local port: {localPort}");
 
         IPEndPoint publicEP = await sock.STUN();
+        Debug.WriteLine(publicEP);
 
         sock.OnMessageRecieved += (_, args) =>
         {
@@ -105,33 +106,34 @@ public sealed class SocketTests
         sock.SetRemote(remoteEP);
         Debug.WriteLine($"{publicEP} ---> {remoteEP}");
 
-        using (CancellationTokenSource cts = new())
+        using CancellationTokenSource cts1 = new();
+        
+        cts1.CancelAfter(10000);
+        var punch = sock.HolePunch(cts1.Token);
+
+        using CancellationTokenSource cts2 = new();
+        
+        var poll = sock.StartPolling(cts2.Token);
+
+        await punch;
+
+        var io = Task.Run(async () =>
         {
-            cts.CancelAfter(10000);
-            await sock.HolePunch(cts.Token);
-            Debug.WriteLine("Done punching");
-        }
-
-
-        using (CancellationTokenSource cts = new())
-        {
-            var poll = sock.StartPolling(cts.Token);
-
-            var io = Task.Run(async () =>
+            while (!cts2.IsCancellationRequested)
             {
-                while (!cts.IsCancellationRequested)
+                foreach (var buff in garbageIn)
                 {
-                    foreach (var buff in garbageIn)
-                    {
-                        sock.Send(buff);
-                        await Task.Delay(50);
-                    }
-                    cts.CancelAfter(1000);
+                    sock.Send(buff);
+                    await Task.Delay(50);
                 }
-            });
+                cts2.CancelAfter(1000);
+            }
+        });
 
-		    await Task.WhenAll(poll, io);
-        }
+		await Task.WhenAll(poll, io);
+        
+
+        await Task.Delay(10000);
 
 		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
 		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))

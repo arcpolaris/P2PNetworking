@@ -78,6 +78,11 @@ public partial class P2PSocket : IDisposable
 			} catch (OperationCanceledException) { break; }
 			if (read <= 0) break;
 			ArraySegment<byte> segment = new(buffer, 0, read);
+			if (segment.AsSpan().SequenceEqual("punch"u8))
+			{
+				Debug.WriteLine("punch got through!!");
+				continue;
+			}
 			OnMessageRecieved?.Invoke(this, new([.. segment]));
 		}
 	}
