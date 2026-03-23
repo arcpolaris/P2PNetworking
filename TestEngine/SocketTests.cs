@@ -106,33 +106,28 @@ public sealed class SocketTests
         sock.SetRemote(remoteEP);
         Debug.WriteLine($"{publicEP} ---> {remoteEP}");
 
-        using CancellationTokenSource cts1 = new();
-        
-        cts1.CancelAfter(10000);
-        var punch = sock.HolePunch(cts1.Token);
+		using CancellationTokenSource cts = new();
+		cts.CancelAfter(TimeSpan.FromSeconds(12));
 
-        using CancellationTokenSource cts2 = new();
-        
-        var poll = sock.StartPolling(cts2.Token);
+		var punch = sock.HolePunch(cts.Token);
+		var poll = sock.StartPolling(cts.Token);
 
-        await Task.Delay(5000);
+		var io = Task.Run(async () =>
+		{
+			await Task.Delay(500);
 
-        var io = Task.Run(async () =>
-        {
-            
-            foreach (var buff in garbageIn)
-            {
-                sock.Send(buff);
-                await Task.Delay(50);
-            }
+			foreach (var buff in garbageIn)
+			{
+				sock.Send(buff);
+				await Task.Delay(50);
+			}
 
-            await Task.Delay(1000);
+			await Task.Delay(1000);
+			cts.Cancel();
+		});
 
-            cts2.Cancel();
-        });
+		await Task.WhenAll(punch, poll, io);
 
-		await Task.WhenAll(poll, io, punch);
-        
 
 		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
 		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
