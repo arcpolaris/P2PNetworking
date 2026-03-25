@@ -1,4 +1,6 @@
-﻿using System;
+﻿#if DEBUG
+
+using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -9,12 +11,10 @@ using Microsoft.CodeAnalysis.Text;
 namespace NetModel.CodeGen;
 
 [Generator]
-public class ProtocolGenerator : IIncrementalGenerator
+public class TestGenerator : IIncrementalGenerator
 {
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
-		Debug.WriteLine("Running");
-
 		var protocols = context.SyntaxProvider.CreateSyntaxProvider(
 			predicate: static (syntaxNode, _) =>
 				syntaxNode is InterfaceDeclarationSyntax iDecl &&
@@ -24,7 +24,7 @@ public class ProtocolGenerator : IIncrementalGenerator
 			transform: static (ctx, _) =>
 				ctx.Node is InterfaceDeclarationSyntax iDecl &&
 				ctx.SemanticModel.GetDeclaredSymbol(iDecl) is ISymbol symbol &&
-				ctx.SemanticModel.Compilation.GetTypeByMetadataName("NetModel.ProtocolAttribute") is INamedTypeSymbol attr &&
+				ctx.SemanticModel.Compilation.GetTypeByMetadataName("NetModel.CodeGenTestAttribute") is INamedTypeSymbol attr &&
 				symbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attr)) ?
 				symbol : null
 		).Where(static p => p is not null);
@@ -47,3 +47,5 @@ public class ProtocolGenerator : IIncrementalGenerator
 		});
 	}
 }
+
+#endif

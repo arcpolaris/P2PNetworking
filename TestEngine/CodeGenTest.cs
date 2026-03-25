@@ -7,11 +7,8 @@ using NetModel;
 
 namespace TestEngine;
 
-[Protocol]
-public partial interface ITestProtocol
-{
-
-}
+[CodeGenTest]
+public partial interface ICodeGenTest { }
 
 [TestClass]
 public sealed class CodeGenTest
@@ -21,6 +18,6 @@ public sealed class CodeGenTest
 	[TestMethod]
 	public void CodeGenSanity()
 	{
-		ITestProtocol.Test();
+		ICodeGenTest.Test();
 	}
 }
