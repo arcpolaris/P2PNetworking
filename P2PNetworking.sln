@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetModel", "NetModel\NetMod
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestEngine", "TestEngine\TestEngine.csproj", "{573384E8-B3EE-4DC0-9804-92F755640ED7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetModel.CodeGen", "NetModel.CodeGen\NetModel.CodeGen.csproj", "{C884A33D-B74D-47C2-BEB3-24A47E6378EC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{573384E8-B3EE-4DC0-9804-92F755640ED7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{573384E8-B3EE-4DC0-9804-92F755640ED7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{573384E8-B3EE-4DC0-9804-92F755640ED7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C884A33D-B74D-47C2-BEB3-24A47E6378EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C884A33D-B74D-47C2-BEB3-24A47E6378EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C884A33D-B74D-47C2-BEB3-24A47E6378EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C884A33D-B74D-47C2-BEB3-24A47E6378EC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

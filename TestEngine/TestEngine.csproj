@@ -12,4 +12,8 @@
     <ProjectReference Include="..\NetModel\NetModel.csproj" />
   </ItemGroup>
 
+	<ItemGroup>
+		<Analyzer Include="..\NetModel.CodeGen\bin\Debug\Netstandard2.0\NetModel.CodeGen.dll"/>
+	</ItemGroup>
+
 </Project>
