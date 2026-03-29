@@ -1,5 +1,7 @@
 ﻿using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace NetModel.CodeGen;
 
@@ -50,6 +52,37 @@ internal static class Diagnostics
 		isEnabledByDefault: true
 	);
 
-	public static void AddNewDiagnostic(this ImmutableArray<Diagnostic>.Builder builder, DiagnosticDescriptor descriptor, SyntaxNode syntax)
-		=> builder.Add(Diagnostic.Create(descriptor, syntax.GetLocation(), syntax.GetText()));
+	public static readonly DiagnosticDescriptor MissingSchemaKey = new(
+		id: "P2P006",
+		title: "Schema must declare a key",
+		messageFormat: "Schema '{0}' does not declare a valid key",
+		category: "Usage",
+		DiagnosticSeverity.Error,
+		isEnabledByDefault: true
+	);
+
+	public static readonly DiagnosticDescriptor InvalidProperty = new(
+		id: "P2P007",
+		title: "Properties in a schema must have a setter and be auto-backed",
+		messageFormat: "Property '{0}' does not have a setter and/or is not auto-backed and will not be serialized",
+		category: "Usage",
+		DiagnosticSeverity.Warning,
+		isEnabledByDefault: true
+	);
+
+	public static void AddTypeDiagnostic(
+		this ImmutableArray<Diagnostic>.Builder builder,
+		DiagnosticDescriptor descriptor,
+		TypeDeclarationSyntax syntax)
+	{
+		builder.Add(Diagnostic.Create(descriptor, syntax.Identifier.GetLocation(), syntax.Identifier.Text));
+	}
+
+	public static void AddSymbolDiagnostic(
+		this ImmutableArray<Diagnostic>.Builder builder,
+		DiagnosticDescriptor descriptor,
+		INamedTypeSymbol symbol)
+	{
+		builder.Add(Diagnostic.Create(descriptor, symbol.Locations.FirstOrDefault(), symbol.Name));
+	}
 }

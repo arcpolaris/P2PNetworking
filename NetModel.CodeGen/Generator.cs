@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -12,31 +11,43 @@ using Microsoft.CodeAnalysis.Text;
 namespace NetModel.CodeGen;
 
 [Generator]
-public class Generator : IIncrementalGenerator
+public sealed class Generator : IIncrementalGenerator
 {
-	internal sealed record class ProtocolInfo(INamedTypeSymbol Symbol, ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<KeyValuePair<ushort, INamedTypeSymbol>>? Schemas = null);
-	internal sealed record class SchemaIntermediate(INamedTypeSymbol Symbol, ClassDeclarationSyntax Syntax, ushort Key);
-	internal sealed record class SchemaInfo(INamedTypeSymbol Symbol, ImmutableArray<Diagnostic> Diagnostics, INamedTypeSymbol? Protocol, ushort Key);
-	
+	internal sealed record class ProtocolInfo(
+		INamedTypeSymbol Symbol,
+		ImmutableArray<Diagnostic> Diagnostics,
+		ImmutableArray<KeyValuePair<ushort, INamedTypeSymbol>>? Schemas = null);
+
+	internal sealed record class SchemaIntermediate(
+		INamedTypeSymbol Symbol,
+		ClassDeclarationSyntax Syntax,
+		ushort? Key);
+
+	internal sealed record class SchemaInfo(
+		INamedTypeSymbol Symbol,
+		ImmutableArray<Diagnostic> Diagnostics,
+		INamedTypeSymbol? Protocol,
+		ushort? Key);
+
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
-		var protocols = context.SyntaxProvider.ForAttributeWithMetadataName<ProtocolInfo>(
+		var protocols = context.SyntaxProvider.ForAttributeWithMetadataName<ProtocolInfo?>(
 			"NetModel.ProtocolAttribute",
 			predicate: static (node, _) => node is InterfaceDeclarationSyntax,
 			transform: static (ctx, _) =>
 			{
-				if (ctx.TargetSymbol is not INamedTypeSymbol symbol) return null!;
-				var syntax = (InterfaceDeclarationSyntax)ctx.TargetNode;
+				if (ctx.TargetSymbol is not INamedTypeSymbol symbol) return null;
+				if (ctx.TargetNode is not InterfaceDeclarationSyntax syntax) return null;
 
-				var builder = ImmutableArray.CreateBuilder<Diagnostic>();
+				var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
-				if (!syntax.Modifiers.All(m => m.IsKind(SyntaxKind.PartialKeyword)))
-					builder.Add(Diagnostic.Create(Diagnostics.MustBePartial, syntax.GetLocation(), syntax.GetText()));
+				if (!HasPartialModifier(syntax))
+					diagnostics.AddTypeDiagnostic(Diagnostics.MustBePartial, syntax);
 
-
-				return new ProtocolInfo(symbol, builder.ToImmutable());
-
-			}).Where(static p => p is not null);
+				return new ProtocolInfo(symbol, diagnostics.ToImmutable());
+			})
+			.Where(static p => p is not null)!
+			.Select(static (p, _) => p!);
 
 		var schemas = context.SyntaxProvider.ForAttributeWithMetadataName<SchemaIntermediate?>(
 			"NetModel.SchemaAttribute",
@@ -44,159 +55,244 @@ public class Generator : IIncrementalGenerator
 			transform: static (ctx, _) =>
 			{
 				if (ctx.TargetSymbol is not INamedTypeSymbol symbol) return null;
-				var syntax = (ClassDeclarationSyntax)ctx.TargetNode;
+				if (ctx.TargetNode is not ClassDeclarationSyntax syntax) return null;
 
-				if (ctx.Attributes.SingleOrDefault(null!) is not AttributeData data) return null;
-
-				if (data.NamedArguments.Single(kvp => kvp.Key == "Key").Value.Value is not ushort key) return null;
-
-				return new SchemaIntermediate(symbol, syntax, key);
-			}).Where(static s => s is not null)
+				return new SchemaIntermediate(symbol, syntax, TryGetSchemaKey(ctx.Attributes));
+			})
+			.Where(static s => s is not null)
+			.Select(static (s, _) => s!)
 			.Collect()
 			.Combine(protocols.Select(static (info, _) => info.Symbol).Collect())
 			.SelectMany(static (ctx, _) =>
 			{
 				var (schemas, protocols) = ctx;
-				return schemas.Select(intermediate =>
+
+				var protocolSet = protocols
+					.Select(static protocol => protocol.OriginalDefinition)
+					.ToImmutableHashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+
+				return schemas.Select(schema =>
 				{
-					(INamedTypeSymbol symbol, ClassDeclarationSyntax syntax, ushort key) = intermediate!;
-					var builder = ImmutableArray.CreateBuilder<Diagnostic>();
+					var (symbol, syntax, key) = schema;
+					var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
-					if (!syntax.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)))
-						builder.AddNewDiagnostic(Diagnostics.MustBePartial, syntax);
+					if (!HasPartialModifier(syntax))
+						diagnostics.AddTypeDiagnostic(Diagnostics.MustBePartial, syntax);
 
-					var candidateProtocols = symbol.Interfaces.Intersect<INamedTypeSymbol>(protocols, SymbolEqualityComparer.Default).ToList();
+					if (key is null)
+					{
+						diagnostics.AddSymbolDiagnostic(Diagnostics.MissingSchemaKey, symbol);
+						return new SchemaInfo(symbol, diagnostics.ToImmutable(), null, null);
+					}
+
+					var candidateProtocols = symbol.AllInterfaces
+						.Select(static i => i.OriginalDefinition)
+						.Where(protocolSet.Contains)
+						.Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
+						.ToList();
+
+					INamedTypeSymbol? protocol = null;
 
 					if (candidateProtocols.Count == 0)
-						builder.AddNewDiagnostic(Diagnostics.MustImplementProtocol, syntax);
+						diagnostics.AddSymbolDiagnostic(Diagnostics.MustImplementProtocol, symbol);
 					else if (candidateProtocols.Count > 1)
-						builder.AddNewDiagnostic(Diagnostics.MustImplementOneProtocol, syntax);
-
-					var protocol = candidateProtocols.SingleOrDefault(null);
+						diagnostics.AddSymbolDiagnostic(Diagnostics.MustImplementOneProtocol, symbol);
+					else
+						protocol = candidateProtocols[0];
 
 					if (symbol.IsGenericType)
-						builder.AddNewDiagnostic(Diagnostics.CannotBeGeneric, syntax);
+						diagnostics.AddSymbolDiagnostic(Diagnostics.CannotBeGeneric, symbol);
 
-					return new SchemaInfo(symbol, builder.MoveToImmutable(), protocol, key);
+					return new SchemaInfo(symbol, diagnostics.ToImmutable(), protocol, key);
 				});
 			});
 
 		protocols = protocols.Collect()
-			.Combine(schemas.Where(static info => info.Protocol is not null).Collect())
+			.Combine(schemas.Collect())
 			.SelectMany(static (ctx, _) =>
 			{
 				var (protocols, schemas) = ctx;
 
-				var schemaLookup = schemas.ToLookup(static info => info.Protocol, SymbolEqualityComparer.Default);
-				return protocols.Select(protocol => (protocol, schemaLookup[protocol.Symbol])).Select(static intermediate =>
+				var schemaLookup = schemas
+					.Where(static info => info.Protocol is not null && info.Key is not null)
+					.ToLookup(static info => info.Protocol!, SymbolEqualityComparer.Default);
+
+				return protocols.Select(protocol =>
 				{
-					var (protocol, schemas) = intermediate;
-
-					var schemaLookup = schemas.ToLookup(static schema => schema.Key);
-
 					var builder = ImmutableArray.CreateBuilder<Diagnostic>();
-
 					builder.AddRange(protocol.Diagnostics);
 
-					foreach (var schema in schemaLookup.Where(static group => group.Skip(1).Any()).SelectMany(static item => item))
+					var groupedSchemas = schemaLookup[protocol.Symbol].ToLookup(static schema => schema.Key!.Value);
+
+					foreach (var schema in groupedSchemas.Where(static group => group.Skip(1).Any()).SelectMany(static group => group))
+						builder.Add(Diagnostic.Create(Diagnostics.NoDuplicateKeys, schema.Symbol.Locations.FirstOrDefault(), schema.Symbol.Name));
+
+					var uniqueSchemas = groupedSchemas
+						.Where(static group => group.Count() == 1)
+						.Select(static group => group.First());
+
+					return protocol with
 					{
-						builder.Add(Diagnostic.Create(Diagnostics.NoDuplicateKeys, schema.Symbol.Locations.First(), schema.Symbol.Name));
-					}
-
-					
-
-					return protocol with { Schemas = ImmutableArray.CreateRange(schemas.Select(static info => new KeyValuePair<ushort, INamedTypeSymbol>(info.Key, info.Symbol))), Diagnostics = builder.ToImmutable() };
+						Schemas = uniqueSchemas
+							.OrderBy(static schema => schema.Key)
+							.Select(static schema => new KeyValuePair<ushort, INamedTypeSymbol>(schema.Key!.Value, schema.Symbol))
+							.ToImmutableArray(),
+						Diagnostics = builder.ToImmutable()
+					};
 				});
 			});
 
-		
-
-
-		context.RegisterSourceOutput(protocols, static (spc, protocol) =>
+		context.RegisterSourceOutput(protocols, static (spc, info) =>
 		{
-			var (symbol, diagnoses, schemas) = protocol;
+			var (protocol, diagnostics, schemas) = info;
 
-			foreach (var diagnostic in diagnoses) spc.ReportDiagnostic(diagnostic);
-			if (diagnoses.Any(diagnosis => diagnosis.Severity == DiagnosticSeverity.Error)) return;
+			foreach (var diagnostic in diagnostics)
+				spc.ReportDiagnostic(diagnostic);
 
-			string code = GenerateProtocol(symbol, ((IEnumerable<KeyValuePair<ushort, INamedTypeSymbol>>)schemas!).ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
-			spc.AddSource($"{symbol.Name}.Protocol.g.cs", SourceText.From(code, Encoding.UTF8));
+			if (diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+				return;
+
+			string code = GenerateProtocol(protocol, schemas!);
+			spc.AddSource($"{protocol.Name}.Protocol.g.cs", SourceText.From(code, Encoding.UTF8));
 		});
 
-		context.RegisterSourceOutput(schemas, static (spc, schema) =>
+		var attributeProvider = context.CompilationProvider
+										.Select(static (compilation, _) => new {
+											IgnoreAttribute = compilation.GetTypeByMetadataName("NetModel.IgnoreAttribute")!,
+											IncludeAttribute = compilation.GetTypeByMetadataName("NetModel.IncludeAttribute")!,
+											FixedLengthAttribute = compilation.GetTypeByMetadataName("NetModel.FixedLengthAttribute")!,
+										});
+
+		context.RegisterSourceOutput(schemas, static (spc, info) =>
 		{
-			var (symbol, diagnoses, protocol, key) = schema;
+			var (schema, upstreamDiagnostics, protocol, key) = info;
 
-			foreach (var diagnostic in diagnoses) spc.ReportDiagnostic(diagnostic);
-			if (diagnoses.Any(diagnosis => diagnosis.Severity == DiagnosticSeverity.Error)) return;
+			var diagnostics = upstreamDiagnostics.ToBuilder();
 
-			string code = GenerateSchema(symbol, protocol!, key);
-			spc.AddSource($"{symbol.Name}.Schema.g.cs", SourceText.From(code, Encoding.UTF8));
+			var fields = schema.GetMembers().OfType<IFieldSymbol>();
+			var backings = fields.Where(field => field.IsImplicitlyDeclared &&
+												 field.AssociatedSymbol is IPropertySymbol property &&
+												 
+												 property.GetAttributes().Contains();
+
+			foreach (var diagnostic in diagnostics)
+				spc.ReportDiagnostic(diagnostic);
+
+			if (diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+				return;
+
+			if (protocol is null || key is null)
+				return;
+
+			string code = GenerateSchema(schema, protocol, key.Value);
+			spc.AddSource($"{schema.Name}.Schema.g.cs", SourceText.From(code, Encoding.UTF8));
 		});
 	}
 
-	private static string GenerateSchema(INamedTypeSymbol symbol, INamedTypeSymbol protocol, ushort key)
+	private static bool HasPartialModifier(TypeDeclarationSyntax syntax)
+		=> syntax.Modifiers.Any(static modifier => modifier.IsKind(SyntaxKind.PartialKeyword));
+
+	private static ushort? TryGetSchemaKey(ImmutableArray<AttributeData> attributes)
 	{
-		return $$"""
+		foreach (var attribute in attributes)
+		{
+			if (attribute.ConstructorArguments.Length > 0 &&
+				attribute.ConstructorArguments[0].Value is ushort constructorKey)
+			{
+				return constructorKey;
+			}
+
+			foreach (var argument in attribute.NamedArguments)
+			{
+				if (argument.Key == "Key" && argument.Value.Value is ushort namedKey)
+					return namedKey;
+			}
+		}
+
+		return null;
+	}
+
+	private static string GenerateSchema(INamedTypeSymbol schema, INamedTypeSymbol protocol, ushort key)
+	{
+		
+
+		StringBuilder sb = new();
+		sb.AppendLine($$"""
 		// <auto-generated>
-		// Member of {{protocol.Name}}
+		#nullable enable
 		using NetModel;
 
 		using System;
 
-		namespace {{symbol.ContainingNamespace.ToDisplayString()}};
+		namespace {{schema.ContainingNamespace.ToDisplayString()}};
 
-		partial class {{symbol.Name}} {
+		// Member of {{protocol.Name}}
+		partial class {{schema.Name}} {
 			public static ushort Key => {{key}};
-
-			public {{protocol.Name}} Serialize(MemoryStream stream) => throw new NotImplementedException();
-			public {{protocol.Name}} Deserialize(MemoryStream stream) => throw new NotImplementedException();
+		""");
+		sb.AppendLine($$"""
+			public void Serialize(BinaryWriter writer) => throw new NotImplementedException();
+			public static DeserializationResult Deserialize(BinaryReader reader, out {{schema.Name}}? schema) => throw new NotImplementedException();
 		}
-		""";
+		""");
+		return sb.ToString();
 	}
 
-	private static string GenerateProtocol(INamedTypeSymbol symbol, Dictionary<ushort, INamedTypeSymbol> schemas)
+	private static string GenerateProtocol(
+		INamedTypeSymbol protocol,
+		IEnumerable<KeyValuePair<ushort, INamedTypeSymbol>> schemas)
 	{
+		var externalNamespaces = schemas.Select(kvp => kvp.Value.ContainingNamespace)
+								  .Distinct<INamespaceSymbol>(SymbolEqualityComparer.Default)
+								  .Where<INamespaceSymbol>(space => !SymbolEqualityComparer.Default.Equals(space, protocol.ContainingNamespace))
+								  .Select(space => space.ToDisplayString());
 		StringBuilder sb = new();
 		sb.AppendLine($$"""
 		// <auto-generated>
+		#nullable enable
 		using NetModel;
-		
-		namespace {{symbol.ContainingNamespace.ToDisplayString()}};
+		""");
+		foreach (var space in externalNamespaces)
+		{
+			sb.AppendFormat("using {0};\n", space);
+		}
+		sb.AppendLine($$"""
+		namespace {{protocol.ContainingNamespace.ToDisplayString()}};
 
-		partial interface {{symbol.Name}} {
-			public static ushort Key {get}
+		partial interface {{protocol.Name}} {
+			public static abstract ushort Key {get;}
 			
 			public void Serialize(BinaryWriter reader);
-			public void BeforeSerialize() { };
+			public void BeforeSerialize() { }
 
-			public void Deserialize(BinaryReader reader);
-
-			public static DeserializationResult Deserialize(
+			public static virtual DeserializationResult Deserialize(
 				BinaryReader reader,
-				out {{symbol.Name}}? schema
+				out {{protocol.Name}}? schema
 			) {
 				switch(reader.ReadUInt16()) {
 		""");
 
-		foreach (ushort key in schemas.Keys)
+		foreach ((ushort key, INamedTypeSymbol schema) in schemas.Select(static kvp => (kvp.Key, kvp.Value)))
 		{
-			var schema = schemas[key];
 			sb.AppendLine($$"""
 					case {{key}}:
-						schema = {{schema.Name}}.Deserialize(reader);
-						return DeserializationResult.Success;
-		""");
+					{
+						var result = {{schema.Name}}.Deserialize(reader, out var concrete);
+						schema = concrete as {{protocol.Name}};
+						return result;
+					}
+			""");
 		}
 
 		sb.Append("""
 					default:
 						schema = null;
-						return DeserializationResult.Failure;
+						return DeserializationResult.Failure | DeserializationResult.UnknownKey;
+				}
 			}
 		}
 		""");
+
 		return sb.ToString();
 	}
 }
-

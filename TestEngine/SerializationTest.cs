@@ -56,7 +56,5 @@ public sealed class SerializationTest
 	public void EmptySchemaDeserialize()
 	{
 		var x = new EmptySchema();
-		
-		
 	}
 }
