@@ -110,10 +110,10 @@ package Protocols {
 
 ~ class SchemaGenerator <<sealed>>
 stereotype "<i>IProtocol" as IProtocol <<partial interface>>{
-	+ {abstract} ushort Key <<get>>
-	+ ushort GetKey<T>() <<where T : class, IProtocol>> <<static>>
+	+ {abstract} ushort Key <<get>> <<static>>
 	+ DeserializationResult Deserialize(MemoryStream stream, out IProtocol? schema) <<static>>
 	+ {abstract} void Serialize(MemoryStream stream)
+	+ void BeforeSerialize() <<optional>>
 }
 SchemaGenerator -> IProtocol : Generates
 
