@@ -1,162 +1,106 @@
 ﻿@startuml
+!define delegate (D, SteelBlue)
 
-+class	Server <<static>>{
-	 + void Init(Server.Config config)
-	 - Client?[]? clients
-	 - Socket?[]? sockets
-	 + Config? Config <<get; private set>>
-	 + MessageBus? MessageBus <<get; private set>>
-	 + {method} int ConnectedClients <<get>>
-	 - int FindFreeIndex()
-	 - int FindClient(IPEndPoint address)
-	 - bool IsConnected(int index)
-	 + bool PrepMessage(IMessage message)
-	 + bool PrepImportantMessage(IMessage message)
-	 + void PollEvents()
+
++class Network <<static>>{
+	+List<Peer> Peers <<get; private set>>
+	+RpcBus RpcBus <<get; private set>>
+	-MessageQueue messageQueue
+
+	+Task<Result<Peer>> TryAdmit(float timeout)
+	+Task<Result<Peer>> TryJoin(float timeout)
+	+void Update()
 }
 
-- class JitterBuffer <<static>>
-Server --o JitterBuffer
+Network::RpcBus *-- RpcBus
+Network::Peers o-- Peer
+Network::messageQueue *-- MessageQueue
+P2PSocket .. MessageRecievedEventArgs
 
-note right of Server::PrepMessage
-Since we send 1024 bytes at 
+~class MessageQueue{
+	-Dictionary<UInt16, NetBuffer> buffers
+	+void ProcessFrame()
+	+void Subscribe(Peer peer)
+	+void SendFrame()
+}
+note left of MessageQueue::Subscribe
+Peer sends what it recieves into buffers
+asyncrhonously. Network::Update synchronously
+pulls from buffers
 end note
 
-note right of Server::Init
-Throws InvalidOperationException
-on subsequent calls
-end note
+MessageQueue::buffers *-- NetBuffer
 
-+record	"Server.Config" as Server_Config{
-	bool IsHost
-	int MaxClients = 4
-	int PacketLength = 1024
-}
-Server --* "1" Server_Config
-
-+class	Client {
-	+ ClientState State <<get; private init>>
-	+ IPEndPoint Address <<get; private init>>
-}
-~enum	ClientState {
-	Disconnecting
-	Connecting
-	Connected
-}
-Client --* "1" ClientState
-Server --o "0..*" Client
-
-package Sockets {
-~class	Socket <<sealed>>{
-	+ ushort Port <<get; private set>>
-	+ IPEndPoint? Outbound <<get; set>>
-	- Socket.Handle handle
-	+ Socket()
-	+ Socket(ushort port)
-	+ void SendTo(IPEndPoint address, byte[] data)
-	+ void Send(byte[] data)
-	+ byte[]? RecieveFrom(IPEndPoint address, int maxSize)
-	+ byte[]? Recieve(int maxSize)
-	{method} + bool IsOpen <<get; private set>>
-	+ void Open(ushort port)
-	+ void Close()
-	- void AddRef() <<static>>
-	- void Release() <<static>>
+-class NetBuffer{
+	+Channel<Action> Incoming <<get>>
+	+BinaryStream Outgoing <<get>>
 }
 
--class "Socket.Handle" as Socket_Handle
-object "Unmanaged Code" as Native{
-{abstract} P/Invoke
-}
-}
-abstract class SafeHandle
-Socket_Handle --|> SafeHandle
-
-Socket --* "1" Socket_Handle
-
-interface IDisposable
-
-
-Socket	--|> Native
-Socket_Handle -r-|> Native
-Socket ..|> IDisposable
-
-Server --* "0..*" Socket
-
-package Protocols {
-+ annotation SchemaAttribute <<sealed>>{
-	- ushort key
-	+ {method} ushort Key <<get>>
-}
-
-+ annotation IgnoreAttribute <<sealed>>
-
-+ annotation FixedLengthAttribute <<sealed>>{
-	- uint length
-	+ {method} uint Length <<get>>
-}
-
-+ annotation FixedElementSizeAttribute <<sealed>>{
-	- uint elemSize
-	+ {method} uint ElemSize <<get>>
-}
-
-+ annotation OverrideIndexAttribute <<sealed>>{
-	- int index
-	+ {method} int Index <<get>>
-}
-
-+ annotation ProtocolAttribute <<sealed>>
-
-~ class SchemaGenerator <<sealed>>
-stereotype "<i>IProtocol" as IProtocol <<partial interface>>{
-	+ {abstract} ushort Key <<get>>
-	+ ushort GetKey<T>() <<where T : class, IProtocol>> <<static>>
-	+ DeserializationResult Deserialize(MemoryStream stream, out IProtocol? schema) <<static>>
-	+ {abstract} void Serialize(MemoryStream stream)
-}
-SchemaGenerator -> IProtocol : Generates
-
-stereotype Schema <<partial class>>
-SchemaGenerator -> Schema : Generates
-SchemaAttribute }. Schema
-
-ProtocolAttribute }.. IProtocol
-Schema ..|> IProtocol 
++class P2PSocket implements IDisposable{
+	#int max_packet_size <<const>>
+	~Socket _socket
 	
-note "Examples" as examples
-examples .u.|> Schema
-examples .|> IProtocol
+	+IPEndPoint LocalEndPoint <<get>>
+	+IPEndPoint RemoteEndPoint <<get>>
+
+	+void Bind(int port)
+	+void Dispose()
+	+void Send(ArraySegment<byte> data)
+	+Task SendAsync(ArraySegment<byte> data) <<async>>
+	+void SetRemote(IPEndPoint ep)
+	+Task HolePunch(CancellationToken ct) <<async>>
+	+Task StartPolling(CancellationToken ct) <<async>>
+
+	+{method} EventHandler<MessageRecievedEventArgs>? OnMessageRecieved <<event>>
 }
 
-interface IIncrementalGenerator
-
-SchemaGenerator ..|> IIncrementalGenerator
-
-+ interface IMessage <<Protocol(1024)>>{
-
-}
-ProtocolAttribute }.. IMessage
-
-+ class MessageBus <<static>>{
-	- Dictionary<ushort, HashSet<MessageEvent>> events
-	+ MessageEvent<T> Get<T>() <<where T : class, IMessage>>
++class MessageRecievedEventArgs extends EventArgs{
+	+byte[] Data <<get>>
 }
 
-+ dataclass "void MessageCallback <where T : \n class, IMessage>" as MessageCallback{
-	Client sender
-	T message
++abstract class Peer{
+	+UInt16 Id <<get; private set>>
 }
 
-+ class MessageEvent<where T :\nclass, IMessage> <<sealed>>{
-	+ void Subscribe(MessageCallback<T> callback)
-	~ void Publish(Client sender, T message)
++class DirectPeer extends Peer{
+	~P2PSocket Socket <<get; private set>>
+	+IPEndPoint Address <<get>>
+}
+note right : Server-Client Connection only
+DirectPeer *-- P2PSocket
+note right of Peer::Id
+Peer Ids are synced across
+all members of the network
+end note
+
++class RpcBus <<sealed>>{
+	-Dictionary<UInt16, IRpcRegistration> registry
+	+void Register<T>(UInt16 key, Rpc<T> procedure)
+	+void InvokeRemote<T>(Peer target, T data)
+	+void InvokeLocal<T>(T data)
+	~Result<Action> Digest(BinaryReader reader)
+}
+note right of RpcBus::Digest
+Read key from stream
+Lookup type from key
+Call deserialize for type on stream
+end note
+
+RpcBus::registry o-- IRpcRegistration
+RpcRegistration::Rpc - Rpc
+
+-interface IRpcRegistration{
+	+Type Parameter <<get>>
+	+void Invoke(Peer sender, object data)
 }
 
-Server --* "1" MessageBus
-MessageBus .. IMessage
-MessageEvent -- IMessage
-MessageBus --o "0..*" MessageEvent
-MessageEvent --o "0..*" MessageCallback
+-class RpcRegistration<T> implements IRpcRegistration{
+	+Rpc<T> Rpc <<get>>
+}
+
++class Rpc<T> <<delegate>>{
+	Peer sender
+	T data
+}
 
 @enduml
