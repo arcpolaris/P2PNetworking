@@ -23,8 +23,8 @@ public sealed class SocketTests
         using P2PSocket sock1 = new();
         using P2PSocket sock2 = new();
 
-		sock2.OnMessageRecieved += (_, args) => sock2.Send(args.Data.ToArray());
-		sock1.OnMessageRecieved += (_, args) => garbageOut.Add([.. args.Data]);
+		sock2.OnMessageRecieved += data => sock2.Send(data.ToArray());
+		sock1.OnMessageRecieved += data => garbageOut.Add([.. data]);
 
         sock1.Bind(33333);
         sock2.Bind(33334);
@@ -93,10 +93,10 @@ public sealed class SocketTests
         IPEndPoint publicEP = await sock.STUN();
         Debug.WriteLine(publicEP);
 
-        sock.OnMessageRecieved += (_, args) =>
+        sock.OnMessageRecieved += data =>
         {
             lock(garbageOut)
-            garbageOut.Add(args.Data);
+            garbageOut.Add(data.ToArray());
         };
 
 

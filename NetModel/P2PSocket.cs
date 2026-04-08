@@ -5,15 +5,14 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace NetModel;
 public class P2PSocket : IDisposable
 {
 	const int max_packet_size = 1024;
+	static readonly byte[] punch_probe = "punch"u8.ToArray();
 	internal Socket _socket;
 
 	public P2PSocket()
@@ -56,7 +55,7 @@ public class P2PSocket : IDisposable
 
 	public async Task HolePunch(CancellationToken ct)
 	{
-		byte[] probe = "punch"u8.ToArray();
+		ArraySegment<byte> probe = new(punch_probe);
 
 		while (!ct.IsCancellationRequested)
 		{
@@ -80,16 +79,16 @@ public class P2PSocket : IDisposable
 			} catch (OperationCanceledException) { break; }
 			if (read <= 0) break;
 			ArraySegment<byte> segment = new(buffer, 0, read);
-			if (segment.AsSpan().SequenceEqual("punch"u8))
+			if (segment.AsSpan().SequenceEqual(punch_probe))
 			{
 				Debug.WriteLine("punch got through!!");
 				continue;
 			}
-			OnMessageRecieved?.Invoke(this, new([.. segment]));
+			OnMessageRecieved?.Invoke(segment);
 		}
 	}
 
-	public event EventHandler<MessageRecievedEventArgs>? OnMessageRecieved;
+	public event Action<ArraySegment<byte>>? OnMessageRecieved;
 
 
 
@@ -147,9 +146,4 @@ public class P2PSocket : IDisposable
 
 		return new IPEndPoint(new IPAddress(addressBytes), (port));
 	}
-}
-
-public class MessageRecievedEventArgs(byte[] data) : EventArgs()
-{
-	public byte[] Data { get; } = data;
 }
