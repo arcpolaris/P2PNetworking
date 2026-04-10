@@ -11,8 +11,7 @@ using System.Threading.Tasks;
 namespace NetModel;
 public class P2PSocket : IDisposable
 {
-	const int max_packet_size = 1024;
-	static readonly byte[] punch_probe = "punch"u8.ToArray();
+	public const int max_packet_size = 1024;
 	internal Socket _socket;
 
 	public P2PSocket()
@@ -53,10 +52,8 @@ public class P2PSocket : IDisposable
 		_socket.Connect(ep);
 	}
 
-	public async Task HolePunch(CancellationToken ct)
+	public async Task HolePunch(byte[] probe, CancellationToken ct)
 	{
-		ArraySegment<byte> probe = new(punch_probe);
-
 		while (!ct.IsCancellationRequested)
 		{
 			try
@@ -79,18 +76,11 @@ public class P2PSocket : IDisposable
 			} catch (OperationCanceledException) { break; }
 			if (read <= 0) break;
 			ArraySegment<byte> segment = new(buffer, 0, read);
-			if (segment.AsSpan().SequenceEqual(punch_probe))
-			{
-				Debug.WriteLine("punch got through!!");
-				continue;
-			}
 			OnMessageRecieved?.Invoke(segment);
 		}
 	}
 
 	public event Action<ArraySegment<byte>>? OnMessageRecieved;
-
-
 
 	public async Task<IPEndPoint> STUN()
 	{

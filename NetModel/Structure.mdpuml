@@ -10,6 +10,7 @@
 	+Task<Result<Peer>> TryAdmit(float timeout)
 	+Task<Result<Peer>> TryJoin(float timeout)
 	+void Update()
+	+void Send<T>(in SendTarget target, T message)
 }
 
 Network::RpcBus *-- RpcBus
@@ -18,7 +19,7 @@ Network::messageQueue *-- MessageQueue
 P2PSocket .. MessageRecievedEventArgs
 
 ~class MessageQueue{
-	-Dictionary<UInt16, NetBuffer> buffers
+	-Dictionary<NetKey, NetBuffer> buffers
 	+void ProcessFrame()
 	+void Subscribe(Peer peer)
 	+void SendFrame()
@@ -59,7 +60,7 @@ MessageQueue::buffers *-- NetBuffer
 }
 
 +abstract class Peer{
-	+UInt16 Id <<get; private set>>
+	+NetKey Id <<get; private set>>
 }
 
 +class DirectPeer extends Peer{
@@ -73,11 +74,11 @@ Peer Ids are synced across
 all members of the network
 end note
 
-+class RpcBus <<sealed>>{
-	-Dictionary<UInt16, IRpcRegistration> registry
-	+void Register<T>(UInt16 key, Rpc<T> procedure)
-	+void InvokeRemote<T>(Peer target, T data)
-	+void InvokeLocal<T>(T data)
+~class RpcBus <<sealed>>{
+	-Dictionary<NetKey, IRpcRegistration> registry
+	+void Register<T>(NetKey key, Rpc<T> procedure)
+	~void InvokeRemote<T>(Peer target, T data)
+	~void InvokeLocal<T>(T data)
 	~Result<Action> Digest(BinaryReader reader)
 }
 note right of RpcBus::Digest
@@ -89,12 +90,12 @@ end note
 RpcBus::registry o-- IRpcRegistration
 RpcRegistration::Rpc - Rpc
 
--interface IRpcRegistration{
+~interface IRpcRegistration{
 	+Type Parameter <<get>>
 	+void Invoke(Peer sender, object data)
 }
 
--class RpcRegistration<T> implements IRpcRegistration{
+~class RpcRegistration<T> implements IRpcRegistration{
 	+Rpc<T> Rpc <<get>>
 }
 

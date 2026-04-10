@@ -75,6 +75,7 @@ public sealed class SocketTests
     //[DataRow(676767, 33335, "174.277.49.79", 33338)]
     public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)
     {
+        var punch_probe = "punch"u8.ToArray();
 		Random rnd = new(seed);
 		List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
 		{
@@ -95,7 +96,13 @@ public sealed class SocketTests
 
         sock.OnMessageRecieved += data =>
         {
-            lock(garbageOut)
+
+			if (data.AsSpan().SequenceEqual(punch_probe))
+			{
+				Debug.WriteLine("punch got through!!");
+				return;
+			}
+			lock (garbageOut)
             garbageOut.Add(data.ToArray());
         };
 
@@ -109,7 +116,7 @@ public sealed class SocketTests
 		using CancellationTokenSource cts = new();
 		cts.CancelAfter(TimeSpan.FromSeconds(12));
 
-		var punch = sock.HolePunch(cts.Token);
+		var punch = sock.HolePunch(punch_probe, cts.Token);
 		var poll = sock.StartPolling(cts.Token);
 
 		var io = Task.Run(async () =>
