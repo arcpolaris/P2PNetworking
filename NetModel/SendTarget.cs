@@ -1,6 +1,6 @@
 ﻿namespace NetModel;
 
-public readonly record struct SendTarget(TargetKind Kind, Peer Peer)
+public readonly record struct SendTarget(TargetKind Kind, Peer? Peer)
 {
 	
 }

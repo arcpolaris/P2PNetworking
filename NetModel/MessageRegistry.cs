@@ -1,22 +1,19 @@
 ﻿using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.IO;
-using Ardalis.GuardClauses;
-using FluentResults;
 using MessagePack;
 using MessagePack.Resolvers;
 
 namespace NetModel;
 
-internal class MessageBus : IMessageLookup
+internal class MessageRegistry : IMessageLookup
 {
-	private IDictionary<NetKey, IRpcRegistration> registry = new Dictionary<NetKey, IRpcRegistration>();
+	private IDictionary<NetKey, IRpcRegistration> rpcLookup = new Dictionary<NetKey, IRpcRegistration>();
 	private IDictionary<Type, NetKey> typeLookup = new Dictionary<Type, NetKey>();
 
 	private MessagePackSerializerOptions serializerOptions;
 
-	public MessageBus()
+	public MessageRegistry()
 	{
 		var formatter = new MessageFormatter(this);
 		var resolver = CompositeResolver.Create(
@@ -32,12 +29,7 @@ internal class MessageBus : IMessageLookup
 
 	public Type Lookup(NetKey key)
 	{
-		return registry[key].Type;
-	}
-
-	public NetKey Lookup<T>() where T : class, IMessage
-	{
-		return typeLookup[typeof(T)];
+		return rpcLookup[key].Type;
 	}
 
 	public NetKey Lookup(Type type)
@@ -47,22 +39,29 @@ internal class MessageBus : IMessageLookup
 
 	public void Register<T>(NetKey key, Rpc<T> procedure) where T : class, IMessage
 	{
-		if (registry.IsReadOnly)
+		if (rpcLookup.IsReadOnly)
 			throw new InvalidOperationException("The registry has been frozen");
 
 		RpcRegistration<T> registration = new(procedure);
 
-		registry.Add(key, registration);
+		rpcLookup.Add(key, registration);
 		typeLookup.Add(typeof(T), key);
 	}
 
+	internal IRpcRegistration GetRpc(NetKey key) => rpcLookup[key];
+
 	internal void Freeze()
 	{
-		if (registry is FrozenDictionary<NetKey, IRpcRegistration>)
+		if (rpcLookup is FrozenDictionary<NetKey, IRpcRegistration>)
 			return;
 
-		registry = registry.ToFrozenDictionary();
+		rpcLookup = rpcLookup.ToFrozenDictionary();
 		typeLookup = typeLookup.ToFrozenDictionary();
+	}
+
+	internal byte[] Marshal(Packet packet)
+	{
+		return MessagePackSerializer.Serialize<Packet>(packet, serializerOptions);
 	}
 
 	internal Packet Digest(ArraySegment<byte> bytes)

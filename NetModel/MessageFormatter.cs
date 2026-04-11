@@ -1,16 +1,13 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using MessagePack;
 using MessagePack.Formatters;
 
 namespace NetModel;
-internal class MessageFormatter : IMessagePackFormatter<IMessage?>
+[SuppressMessage("Usage", "MsgPack013:Inaccessible formatter", Justification = "Formatter will always be used as an instance")]
+internal class MessageFormatter(IMessageLookup lookup) : IMessagePackFormatter<IMessage?>
 {
-	IMessageLookup Lookup { get; init; }
-
-	public MessageFormatter(IMessageLookup lookup)
-	{
-		Lookup = lookup;
-	}
+	IMessageLookup Lookup { get; init; } = lookup;
 
 	public void Serialize(ref MessagePackWriter writer, IMessage? value, MessagePackSerializerOptions options)
 	{

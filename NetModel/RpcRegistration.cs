@@ -8,9 +8,9 @@ internal class RpcRegistration<T>(Rpc<T> rpc) : IRpcRegistration where T : class
 
 	public Type Type => typeof(T);
 
-	public void Invoke(Peer sender, object data)
+	public void Invoke(Peer sender, object message)
 	{
-		var cast = Guard.Against.WrongType<T>(data);
+		var cast = Guard.Against.WrongType<T>(message);
 		Rpc.Invoke(sender, cast);
 	}
 }

@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
-using Ardalis.GuardClauses;
+using System.Linq;
 
 namespace NetModel;
 
@@ -11,30 +9,44 @@ internal class JitterBuffer
 {
 	private const int capacity = 4;
 
-	private int outgoingTimestamp = 0;
-
-	private List<Packet> incoming;
+	// gotta keep ts sorted
+	private List<Packet> buffer;
 
 	public Peer Remote { get; init; }
 
 	public JitterBuffer(Peer peer)
 	{
-		incoming = new();
+		buffer = new();
 		Remote = peer;
 	}
 
-	public void Add(Packet incoming)
+	/// <summary>
+	/// Add a packet to the incoming buffer, then if unreliable packets exceed capacity, drop the oldest
+	/// </summary>
+	/// <param name="packet"></param>
+	public void Add(Packet packet)
 	{
+		int idx = buffer.BinarySearch(packet);
+		if (idx >= 0) throw new InvalidOperationException("Packet already exists in buffer");
+		buffer.Insert(~idx, packet);
 
+		if (packet.IsReliable) return;
+
+		if (buffer.Where(p => !p.IsReliable).Count() <= capacity) return;
+
+		// at this point we *should* only be one over cap
+		buffer.RemoveAt(buffer.FindIndex(p => !p.IsReliable));
 	}
 
-	/// <summary>
-	/// Consume the packet with the lowest timestamp and execute its calls
-	/// </summary>
-	/// <returns>The timestamp of the packet</returns>
-	public int? Consume()
+	public List<Packet> Consume()
 	{
-		if (incoming.Count == 0) return null;
+		var res = buffer.TakeWhile(p => p.IsReliable).ToList();
+		buffer.RemoveRange(0, res.Count);
+		if (buffer.Count == 0) return res;
 
+		res.Append(buffer[0]);
+		buffer.RemoveAt(0);
+
+		return res;
 	}
 }

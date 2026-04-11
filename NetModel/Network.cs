@@ -14,19 +14,26 @@ public sealed class Network
 	public static Network? Instance { get; private set; }
 
 	private List<Peer> Peers { get; init; }
-	private MessageBus MessageBus { get; init; }
+	private MessageRegistry MessageRegistry { get; init; }
 	private MessageQueue MessageQueue { get; init; }
 
 	private DirectPeer? _host = null;
-	public Peer? Host { get; private set; }
+	public Peer? Host
+	{
+		get
+		{
+			Guard.Against.NotClient(this);
+			return _host;
+		}
+	}
 
 	public bool IsHost { get; private init; }
 
 	private Network()
 	{
 		Peers = new List<Peer>();
-		MessageBus = new();
-		MessageQueue = new(MessageBus);
+		MessageRegistry = new();
+		MessageQueue = new(MessageRegistry);
 	}
 
 	private static void ThrowIfAlreadyInitialized()
@@ -65,6 +72,7 @@ public sealed class Network
 
 	public async Task<Result<Peer>> TryJoin(float timeout)
 	{
+		Guard.Against.NotClient(this);
 
 	}
 
@@ -73,8 +81,38 @@ public sealed class Network
 
 	}
 
-	public void Send<T>(in SendTarget target, NetKey method, T message)
+	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage
 	{
+		MessageRegistry.Register<T>(key, rpc);
+	}
 
+	public void Send<T>(in SendTarget target, T message, bool reliable = false) where T : class, IMessage
+	{
+		switch (target.Kind)
+		{
+			case TargetKind.Host:
+				Guard.Against.NotClient(this);
+				MessageQueue.InvokeRemote(_host!, message, reliable);
+				break;
+			case TargetKind.Client:
+				Guard.Against.NotHost(this);
+				MessageQueue.InvokeRemote(target.Peer!, message, reliable);
+				break;
+			case TargetKind.AllClients:
+				Guard.Against.NotHost(this);
+				foreach (Peer peer in Peers)
+				{
+					MessageQueue.InvokeRemote(peer, message, reliable);
+				}
+				break;
+			case TargetKind.AllClientsExcept:
+				Guard.Against.NotHost(this);
+				foreach (Peer peer in Peers)
+				{
+					if (peer == target.Peer) continue;
+					MessageQueue.InvokeRemote(peer, message, reliable);
+				}
+				break;
+		}
 	}
 }
