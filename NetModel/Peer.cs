@@ -1,6 +1,20 @@
-﻿namespace NetModel;
+﻿using MessagePack;
 
-public class Peer(ushort id)
+namespace NetModel;
+
+[MessagePackObject(AllowPrivate = true)]
+public class Peer
 {
-	public ushort Id { get; } = id;
+	[Key(0)]
+	public ushort Id { get; private init; }
+
+	[SerializationConstructor]
+	internal Peer(ushort id)
+	{
+		Id = id;
+	}
+
+	public override bool Equals(object obj) => obj is Peer other && Id == other.Id;
+
+	public override int GetHashCode() => Id.GetHashCode();
 }

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using FluentResults;
 using Ardalis.GuardClauses;
-using MessagePack.Resolvers;
-using MessagePack.Formatters;
-using MessagePack;
+using System.Net;
+using System.Threading;
+using System.Linq;
+using ObservableCollections;
 
 namespace NetModel;
 
@@ -13,25 +14,34 @@ public sealed class Network
 {
 	public static Network? Instance { get; private set; }
 
-	private List<Peer> Peers { get; init; }
+	private ObservableList<Peer> Peers { get; init; }
 	private MessageRegistry MessageRegistry { get; init; }
 	private MessageQueue MessageQueue { get; init; }
 
-	private DirectPeer? _host = null;
+	private NetKey h_peer_counter = 0;
+
+	private DirectPeer? c_host = null;
 	public Peer? Host
 	{
 		get
 		{
 			Guard.Against.NotClient(this);
-			return _host;
+			return c_host;
 		}
 	}
 
 	public bool IsHost { get; private init; }
 
+	// host will always have Id 0
+	public NetKey? MyId { get; private set; }
+
+	public ISynchronizedView<Peer, NetKey> PeerView { get; private init; }
+
 	private Network()
 	{
-		Peers = new List<Peer>();
+		Peers = new ObservableList<Peer>();
+		PeerView = Peers.CreateView(p => p.Id);		
+
 		MessageRegistry = new();
 		MessageQueue = new(MessageRegistry);
 	}
@@ -51,6 +61,7 @@ public sealed class Network
 		Instance = new Network()
 		{
 			IsHost = true,
+			MyId = 0,
 		};
 	}
 
@@ -64,21 +75,100 @@ public sealed class Network
 		};
 	}
 
-	public async Task<Result<Peer>> TryAdmit(float timeout)
+	public void FinishSetup()
+	{
+		MessageRegistry.Freeze();
+	}
+
+	private static async Task<Result<P2PSocket>> TryUplink(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout)
+	{
+		P2PSocket socket = new();
+		socket.BindAny();
+		local(socket.STUN());
+		socket.SetRemote(await remote());
+
+		bool got_msg = false; // our hole is punched
+
+		//if either peer gets an ack, we're good
+
+		//random garbage
+		byte[] msg = [0x0f, 0x27, 0xdc, 0x1b, 0xa1, 0x3c, 0x6c, 0xa5];
+		byte[] ack = [0x36, 0xe5, 0xc7, 0xd5, 0xa6, 0x43, 0xc4, 0xff];
+
+		byte[] GetProbe() => got_msg ? ack : msg;
+
+		using CancellationTokenSource cts = new();
+
+		void TempMessageHandler(ArraySegment<byte> data)
+		{
+			if (msg.AsSpan().SequenceEqual(data)) got_msg = true;
+			else if (msg.AsSpan().SequenceEqual(ack))
+			{
+				//their hole is punched, so we don't need to keep punching
+				cts.CancelAfter(2000);
+			}
+		}
+
+		socket.OnMessageRecieved += TempMessageHandler;
+		cts.CancelAfter((int)(1000 * punchTimeout));
+
+		_ = socket.StartPolling();
+		await socket.HolePunch(GetProbe, cts.Token);
+
+		if (!got_msg)
+		{
+			socket.Dispose();
+			return Result.Fail<P2PSocket>("Local socket was not punched into");
+		}
+
+		socket.OnMessageRecieved -= TempMessageHandler;
+		return socket;
+	}
+
+	// VERY NOT THREAD SAFE
+	public async Task<Result<Peer>> TryAdmit(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout = 30f)
 	{
 		Guard.Against.NotHost(this);
 
+		Result<P2PSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+
+		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
+
+		P2PSocket socket = uplinkResult.Value;
+		DirectPeer peer = new(++h_peer_counter, socket, socket.RemoteEndPoint);
+		Peers.Add(peer);
+		MessageQueue.Subscribe(peer);
+
+		SendTo<SetId>(peer, new(peer.Id), reliable: true);
+		SendTo<AddPeers>(peer, new(Peers.Except([peer])), reliable: true);
+		SendToAllExcept<AddPeers>(peer, new([peer]), reliable: true);
+
+		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
 	}
 
-	public async Task<Result<Peer>> TryJoin(float timeout)
+
+	public async Task<Result<Peer>> TryJoin(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout = 30f)
 	{
 		Guard.Against.NotClient(this);
 
+		Result<P2PSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+
+		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
+
+		P2PSocket socket = uplinkResult.Value;
+		DirectPeer peer = new(0, socket, socket.RemoteEndPoint);
+		Peers.Add(peer);
+		c_host = peer;
+
+		Send<Ping>(new());
+
+		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
 	}
 
 	public void Update()
 	{
-
+		MessageQueue.ProcessFrame();
+		MessageQueue.SendFrame();
 	}
 
 	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage
@@ -86,13 +176,25 @@ public sealed class Network
 		MessageRegistry.Register<T>(key, rpc);
 	}
 
+	public void Send<T>(T message, bool reliable = false) where T : class, IMessage
+		=> Send(new(IsHost ? TargetKind.AllClients : TargetKind.Host, null), message, reliable);
+
+	public void SendTo<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
+		=> Send(TargetKind.Client, peer, message, reliable);
+
+	public void SendToAllExcept<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
+		=> Send(TargetKind.AllClientsExcept, peer, message, reliable);
+
+	public void Send<T>(TargetKind targetKind, Peer peer, T message, bool reliable = false) where T : class, IMessage
+		=> Send(new(targetKind, peer), message, reliable);
+
 	public void Send<T>(in SendTarget target, T message, bool reliable = false) where T : class, IMessage
 	{
 		switch (target.Kind)
 		{
 			case TargetKind.Host:
 				Guard.Against.NotClient(this);
-				MessageQueue.InvokeRemote(_host!, message, reliable);
+				MessageQueue.InvokeRemote(c_host!, message, reliable);
 				break;
 			case TargetKind.Client:
 				Guard.Against.NotHost(this);

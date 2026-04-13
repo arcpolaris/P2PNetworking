@@ -15,4 +15,10 @@ public static class Helpers
 		
 		return IPAddress.Parse(ip);
 	}
+
+	public static void Deconstruct(this IPEndPoint ep, out IPAddress address, out int port)
+	{
+		address = ep.Address;
+		port = ep.Port;
+	}
 }

@@ -14,15 +14,20 @@ internal class MessageQueue
 			Outbound = new()
 			{
 				IsReliable = false,
-				Timestamp = 0,
 			};
 			OutboundReliable = new()
 			{
 				IsReliable = true,
-				Timestamp = 0,
 			};
 
 			Peer = peer;
+		}
+
+		public void UpdateTimestamps()
+		{
+			Outbound.Timestamp = Timestamp;
+			OutboundReliable.Timestamp = Timestamp;
+			Timestamp++;
 		}
 
 		public JitterBuffer JitterBuffer { get; init; }
@@ -50,10 +55,11 @@ internal class MessageQueue
 			var packets = info.JitterBuffer.Consume();
 			foreach (Packet packet in packets)
 			{
-				if (packet.IsReliable)
-				{
-					throw new NotImplementedException();
-				}
+				// TODO: Implement reliable packets, for now just do testing without them
+				//if (packet.IsReliable)
+				//{
+				//	throw new NotImplementedException();
+				//}
 				foreach (IMessage message in packet.Messages)
 				{
 					InvokeLocal(info.Peer, message);
@@ -79,11 +85,21 @@ internal class MessageQueue
 	{
 		foreach (PeerInfo info in buffers.Values)
 		{
-			byte[] outbound = registry.Marshal(info.Outbound);
-			byte[] outboundReliable = registry.Marshal(info.OutboundReliable);
+			info.UpdateTimestamps();
 
+			// even if there's nothing to send, unreliable is our keep-alive packet
+			byte[] outbound = registry.Marshal(info.Outbound);
 			info.Peer.Socket.Send(outbound);
-			info.Peer.Socket.Send(outboundReliable);
+
+			if (info.OutboundReliable.Messages.Count > 0)
+			{
+				byte[] outboundReliable = registry.Marshal(info.OutboundReliable);
+				info.Peer.Socket.Send(outboundReliable);
+
+				info.OutboundReliable = new Packet { IsReliable = true };
+			}
+
+			info.Outbound = new Packet() { IsReliable = false };
 		}
 	}
 

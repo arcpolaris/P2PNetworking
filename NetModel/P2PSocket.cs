@@ -7,12 +7,15 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentResults;
 
 namespace NetModel;
 public class P2PSocket : IDisposable
 {
 	public const int max_packet_size = 1024;
 	internal Socket _socket;
+
+	private CancellationTokenSource? pollingCTS;
 
 	public P2PSocket()
 	{
@@ -29,8 +32,11 @@ public class P2PSocket : IDisposable
 		_socket.Bind(new IPEndPoint(IPAddress.Any, port));
 	}
 
+	public void BindAny() => Bind(0);
+
 	public void Dispose()
 	{
+		pollingCTS?.Cancel();
 		_socket.Dispose();
 	}
 
@@ -64,8 +70,26 @@ public class P2PSocket : IDisposable
 		}
 	}
 
-	public async Task StartPolling(CancellationToken ct)
+	public async Task HolePunch(Func<byte[]> probe, CancellationToken ct)
 	{
+		while (!ct.IsCancellationRequested)
+		{
+			try
+			{
+				await _socket.SendAsync(probe(), SocketFlags.None, ct);
+				await Task.Delay(250, ct);
+			}
+			catch (OperationCanceledException) { break; }
+		}
+	}
+
+	public async Task StartPolling(CancellationToken ct = default)
+	{
+		if (ct == default)
+		{
+			pollingCTS = new();
+			ct = pollingCTS.Token;
+		}
 		while (!ct.IsCancellationRequested)
 		{
 			byte[] buffer = new byte[max_packet_size];
@@ -78,6 +102,13 @@ public class P2PSocket : IDisposable
 			ArraySegment<byte> segment = new(buffer, 0, read);
 			OnMessageRecieved?.Invoke(segment);
 		}
+	}
+
+	public void EndPolling()
+	{
+		pollingCTS!.Cancel();
+		pollingCTS.Dispose();
+		pollingCTS = null;
 	}
 
 	public event Action<ArraySegment<byte>>? OnMessageRecieved;
