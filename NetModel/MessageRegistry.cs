@@ -15,15 +15,19 @@ internal class MessageRegistry : IMessageLookup
 
 	public MessageRegistry()
 	{
-		var formatter = new MessageFormatter(this);
+		var messageFormatter = new MessageFormatter(this);
+		var packetFormatter = new PacketFormatter(this);
+
 		var resolver = CompositeResolver.Create(
 			[
-				formatter
+				messageFormatter,
+				packetFormatter
 			],
 			[
 				StandardResolver.Instance
 			]
 		);
+
 		serializerOptions = MessagePackSerializerOptions.Standard.WithResolver(resolver);
 	}
 
