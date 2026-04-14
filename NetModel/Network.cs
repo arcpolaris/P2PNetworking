@@ -54,26 +54,41 @@ public sealed class Network
 		}
 	}
 
+	private static Network ConstructHost()
+	{
+		return new Network()
+		{
+			IsHost = true,
+			MyId = 0
+		};
+	}
+
+	private static Network ConstructClient()
+	{
+		return new Network()
+		{
+			IsHost = false,
+		};
+	}
+
 	public static void InitializeHost()
 	{
 		ThrowIfAlreadyInitialized();
 
-		Instance = new Network()
-		{
-			IsHost = true,
-			MyId = 0,
-		};
+		Instance = ConstructHost();
 	}
 
 	public static void InitalizeClient()
 	{
 		ThrowIfAlreadyInitialized();
-
-		Instance = new Network()
-		{
-			IsHost = false,
-		};
+		Instance = ConstructClient();
 	}
+
+#if DEBUG
+	public static Network __NewHost() => ConstructHost();
+	public static Network __NewClient() => ConstructClient();
+#warning Instance constructors should only be used for testing
+#endif
 
 	public void FinishSetup()
 	{
