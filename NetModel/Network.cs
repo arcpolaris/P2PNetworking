@@ -68,7 +68,7 @@ public sealed class Network
 		{
 			Guard.Against.NotClient(this);
 
-			if (removePeers.Peers.Any(p => p.Id == MyId)) Close();
+			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseHostSocket();
 			else
 			{
 				foreach (Peer peer in removePeers.Peers)
@@ -92,7 +92,7 @@ public sealed class Network
 		}
 	}
 
-	private static Network ConstructHost()
+	internal static Network ConstructHost()
 	{
 		return new Network()
 		{
@@ -101,7 +101,7 @@ public sealed class Network
 		};
 	}
 
-	private static Network ConstructClient()
+	internal static Network ConstructClient()
 	{
 		return new Network()
 		{
@@ -112,7 +112,6 @@ public sealed class Network
 	public static void InitializeHost()
 	{
 		ThrowIfAlreadyInitialized();
-
 		Instance = ConstructHost();
 	}
 
@@ -121,12 +120,6 @@ public sealed class Network
 		ThrowIfAlreadyInitialized();
 		Instance = ConstructClient();
 	}
-
-#if DEBUG
-	public static Network __NewHost() => ConstructHost();
-	public static Network __NewClient() => ConstructClient();
-#warning Instance constructors should only be used for testing
-#endif
 
 	public void FinishSetup()
 	{
@@ -221,6 +214,7 @@ public sealed class Network
 
 	public void Update()
 	{
+		MessageQueue.HandleDrops();
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
 	}
@@ -228,9 +222,14 @@ public sealed class Network
 	public void Disconnect(Peer peer)
 	{
 		Guard.Against.NotHost(this);
+		Send<RemovePeers>(new(peer), true);
+		CloseSocket(peer);
+	}
+
+	private void CloseSocket(Peer peer)
+	{
 		Peers.Remove(peer);
 		MessageQueue.Unsubscribe(peer);
-		((DirectPeer)peer).Dispose();
 	}
 
 	public void Close()
@@ -239,15 +238,23 @@ public sealed class Network
 		{
 			foreach (Peer peer in Peers.ToList())
 			{
-				Disconnect(peer);
+				CloseSocket(peer);
 			}
+			Send<RemovePeers>(new(new Peer(0)), true);
 		} else
 		{
 			if (c_host is null) return;
-			MessageQueue.Unsubscribe(c_host);
-			c_host.Dispose();
-			Peers.Clear();
+			Send<RemovePeers>(new(new Peer((ushort)MyId!)), true);
+			CloseHostSocket();
 		}
+	}
+
+	private void CloseHostSocket()
+	{
+		Guard.Against.Null(c_host);
+		MessageQueue.Unsubscribe(c_host);
+		c_host.Dispose();
+		Peers.Clear();
 	}
 
 	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage

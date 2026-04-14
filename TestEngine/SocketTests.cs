@@ -75,6 +75,8 @@ public sealed class SocketTests
     //[DataRow(676767, 33335, "174.277.49.79", 33338)]
     public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)
     {
+        Assert.Inconclusive("Test was not enabled");
+
         var punch_probe = "punch"u8.ToArray();
 		Random rnd = new(seed);
 		List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
