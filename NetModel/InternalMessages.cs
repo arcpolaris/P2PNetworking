@@ -41,6 +41,22 @@ internal partial class AddPeers : IMessage
 	public AddPeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
 }
 
+// Use for DCing and telling others about DCs
+[MessagePackObject(AllowPrivate = true)]
+internal partial class RemovePeers : IMessage
+{
+	[Key(0)]
+	public List<Peer> Peers { get; init; }
+
+	[SerializationConstructor]
+	public RemovePeers(List<Peer> peers) => Peers = peers;
+
+	public RemovePeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
+	public RemovePeers(Peer peer) : this([peer]) { }
+}
+
+
+
 [MessagePackObject(AllowPrivate = true)]
 internal partial class SetId : IMessage
 {

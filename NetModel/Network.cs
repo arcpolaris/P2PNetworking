@@ -18,6 +18,10 @@ public sealed class Network
 	private MessageRegistry MessageRegistry { get; init; }
 	private MessageQueue MessageQueue { get; init; }
 
+	private Dictionary<NetKey, uint> pingRTT = new();
+
+	public uint RTT(Peer peer) => pingRTT[peer.Id];
+
 	private NetKey h_peer_counter = 0;
 
 	private DirectPeer? c_host = null;
@@ -44,6 +48,40 @@ public sealed class Network
 
 		MessageRegistry = new();
 		MessageQueue = new(MessageRegistry);
+
+		MessageRegistry
+		.Register<Ping>(0, (sender, ping) =>
+		{
+			if (IsHost) SendTo<Pong>(sender, new(ping));
+			else Send<Pong>(new(ping));
+		})
+		.Register<Pong>(1, (sender, pong) =>
+		{
+			pingRTT[sender.Id] = (uint)pong.Delta.TotalMilliseconds;
+		})
+		.Register<AddPeers>(2, (sender, addPeers) =>
+		{
+			Guard.Against.NotClient(this);
+			Peers.AddRange(addPeers.Peers);
+		})
+		.Register<RemovePeers>(3, (sender, removePeers) =>
+		{
+			Guard.Against.NotClient(this);
+
+			if (removePeers.Peers.Any(p => p.Id == MyId)) Close();
+			else
+			{
+				foreach (Peer peer in removePeers.Peers)
+				{
+					Peers.Remove(peer);
+				}
+			}
+		}).Register<SetId>(4, (sender, setId) =>
+		{
+			Guard.Against.NotClient(this);
+
+			MyId = setId.Id;
+		});
 	}
 
 	private static void ThrowIfAlreadyInitialized()
@@ -174,6 +212,7 @@ public sealed class Network
 		DirectPeer peer = new(0, socket, socket.RemoteEndPoint);
 		Peers.Add(peer);
 		c_host = peer;
+		MessageQueue.Subscribe(c_host);
 
 		Send<Ping>(new());
 
@@ -184,6 +223,31 @@ public sealed class Network
 	{
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
+	}
+
+	public void Disconnect(Peer peer)
+	{
+		Guard.Against.NotHost(this);
+		Peers.Remove(peer);
+		MessageQueue.Unsubscribe(peer);
+		((DirectPeer)peer).Dispose();
+	}
+
+	public void Close()
+	{
+		if (IsHost)
+		{
+			foreach (Peer peer in Peers.ToList())
+			{
+				Disconnect(peer);
+			}
+		} else
+		{
+			if (c_host is null) return;
+			MessageQueue.Unsubscribe(c_host);
+			c_host.Dispose();
+			Peers.Clear();
+		}
 	}
 
 	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage

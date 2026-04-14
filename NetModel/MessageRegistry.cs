@@ -37,7 +37,7 @@ internal class MessageRegistry : IMessageLookup
 		return typeLookup[type];
 	}
 
-	public void Register<T>(NetKey key, Rpc<T> procedure) where T : class, IMessage
+	public MessageRegistry Register<T>(NetKey key, Rpc<T> procedure) where T : class, IMessage
 	{
 		if (rpcLookup.IsReadOnly)
 			throw new InvalidOperationException("The registry has been frozen");
@@ -46,6 +46,8 @@ internal class MessageRegistry : IMessageLookup
 
 		rpcLookup.Add(key, registration);
 		typeLookup.Add(typeof(T), key);
+
+		return this;
 	}
 
 	internal IRpcRegistration GetRpc(NetKey key) => rpcLookup[key];

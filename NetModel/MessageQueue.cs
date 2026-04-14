@@ -75,6 +75,14 @@ internal class MessageQueue
 		direct.Socket.OnMessageRecieved += data => SocketCallback(peer, data);
 	}
 
+	public void Unsubscribe(Peer peer)
+	{
+		if (!buffers.ContainsKey(peer.Id)) return;
+		DirectPeer direct = Guard.Against.WrongType<DirectPeer>(peer);
+		direct.Socket.OnMessageRecieved -= data => SocketCallback(peer, data);
+		buffers.Remove(peer.Id);
+	}
+
 	private void SocketCallback(Peer peer, ArraySegment<byte> data)
 	{
 		Packet packet = registry.Digest(data);
