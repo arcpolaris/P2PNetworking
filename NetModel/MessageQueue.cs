@@ -43,8 +43,6 @@ internal class MessageQueue
 	private Dictionary<NetKey, PeerInfo> buffers = [];
 	private MessageRegistry registry;
 
-	private HashSet<DirectPeer> pendingDrops = [];
-
 	public MessageQueue(MessageRegistry registry)
 	{
 		this.registry = registry;
@@ -70,18 +68,15 @@ internal class MessageQueue
 		}
 	}
 
-	public void Subscribe(Peer peer)
+	public void Subscribe(DirectPeer peer)
 	{
-		DirectPeer direct = Guard.Against.WrongType<DirectPeer>(peer);
-		buffers.Add(peer.Id, new(direct));
-		direct.Socket.OnMessageRecieved += data => SocketCallback(peer, data);
+		buffers.Add(peer.Id, new(peer));
+		peer.Socket.OnMessageRecieved += data => SocketCallback(peer, data);
 	}
 
-	public void Unsubscribe(Peer peer)
+	public void Remove(DirectPeer peer)
 	{
-		if (!buffers.ContainsKey(peer.Id)) return;
-		DirectPeer direct = Guard.Against.WrongType<DirectPeer>(peer);
-		pendingDrops.Add(direct);
+		buffers.Remove(peer.Id);
 	}
 
 	private void SocketCallback(Peer peer, ArraySegment<byte> data)
@@ -110,21 +105,6 @@ internal class MessageQueue
 
 			info.Outbound = new Packet() { IsReliable = false };
 		}
-	}
-
-	public void HandleDrops()
-	{
-		foreach (DirectPeer peer in pendingDrops)
-		{
-			// DCing should be unreliable because it can be inferred easily
-			// surely this won't cause issues in the future
-			PeerInfo info = buffers[peer.Id];
-			byte[] outbound = registry.Marshal(info.Outbound);
-			info.Peer.Socket.Send(outbound);
-			buffers.Remove(peer.Id);
-			peer.Dispose();
-		}
-		pendingDrops.Clear();
 	}
 
 	internal void InvokeRemote<T>(Peer target, T message, bool reliable = false) where T : class, IMessage

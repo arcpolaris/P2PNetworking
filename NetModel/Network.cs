@@ -10,11 +10,11 @@ using ObservableCollections;
 
 namespace NetModel;
 
-public sealed class Network
+public sealed class Network : IDisposable
 {
 	public static Network? Instance { get; private set; }
 
-	private ObservableList<Peer> Peers { get; init; }
+	private ObservableList<Peer> m_Peers { get; init; }
 	private MessageRegistry MessageRegistry { get; init; }
 	private MessageQueue MessageQueue { get; init; }
 
@@ -25,6 +25,7 @@ public sealed class Network
 	private NetKey h_peer_counter = 0;
 
 	private DirectPeer? c_host = null;
+
 	public Peer? Host
 	{
 		get
@@ -39,12 +40,12 @@ public sealed class Network
 	// host will always have Id 0
 	public NetKey? MyId { get; private set; }
 
-	public ISynchronizedView<Peer, NetKey> PeerView { get; private init; }
+	public ISynchronizedViewList<Peer> Peers { get; private init; }
 
 	private Network()
 	{
-		Peers = new ObservableList<Peer>();
-		PeerView = Peers.CreateView(p => p.Id);		
+		m_Peers = new ObservableList<Peer>();
+		Peers = m_Peers.CreateView(static p => p).ToViewList();		
 
 		MessageRegistry = new();
 		MessageQueue = new(MessageRegistry);
@@ -62,18 +63,18 @@ public sealed class Network
 		.Register<AddPeers>(2, (sender, addPeers) =>
 		{
 			Guard.Against.NotClient(this);
-			Peers.AddRange(addPeers.Peers);
+			m_Peers.AddRange(addPeers.Peers);
 		})
 		.Register<RemovePeers>(3, (sender, removePeers) =>
 		{
 			Guard.Against.NotClient(this);
 
-			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseHostSocket();
+			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseSocket(c_host!);
 			else
 			{
 				foreach (Peer peer in removePeers.Peers)
 				{
-					Peers.Remove(peer);
+					m_Peers.Remove(peer);
 				}
 			}
 		}).Register<SetId>(4, (sender, setId) =>
@@ -182,11 +183,11 @@ public sealed class Network
 
 		P2PSocket socket = uplinkResult.Value;
 		DirectPeer peer = new(++h_peer_counter, socket, socket.RemoteEndPoint);
-		Peers.Add(peer);
+		m_Peers.Add(peer);
 		MessageQueue.Subscribe(peer);
 
 		SendTo<SetId>(peer, new(peer.Id), reliable: true);
-		SendTo<AddPeers>(peer, new(Peers.Except([peer])), reliable: true);
+		SendTo<AddPeers>(peer, new(m_Peers.Except([peer])), reliable: true);
 		SendToAllExcept<AddPeers>(peer, new([peer]), reliable: true);
 
 		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
@@ -203,7 +204,7 @@ public sealed class Network
 
 		P2PSocket socket = uplinkResult.Value;
 		DirectPeer peer = new(0, socket, socket.RemoteEndPoint);
-		Peers.Add(peer);
+		m_Peers.Add(peer);
 		c_host = peer;
 		MessageQueue.Subscribe(c_host);
 
@@ -214,47 +215,40 @@ public sealed class Network
 
 	public void Update()
 	{
-		MessageQueue.HandleDrops();
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
 	}
 
-	public void Disconnect(Peer peer)
+	public void Kick(Peer peer)
 	{
 		Guard.Against.NotHost(this);
-		Send<RemovePeers>(new(peer), true);
-		CloseSocket(peer);
+		//WARNING: we don't tell someone when they have been kicked
+		SendToAllExcept(peer, new RemovePeers(peer), true);
+		CloseSocket((DirectPeer)peer);
 	}
 
-	private void CloseSocket(Peer peer)
+	private void CloseSocket(DirectPeer peer)
 	{
-		Peers.Remove(peer);
-		MessageQueue.Unsubscribe(peer);
+		MessageQueue.Remove(peer);
+		m_Peers.Remove(peer);
+		peer.Dispose();
 	}
 
-	public void Close()
+	public void Disconnect()
 	{
 		if (IsHost)
 		{
-			foreach (Peer peer in Peers.ToList())
+			foreach (Peer peer in m_Peers.ToList())
 			{
-				CloseSocket(peer);
+				CloseSocket((DirectPeer)peer);
 			}
 			Send<RemovePeers>(new(new Peer(0)), true);
 		} else
 		{
 			if (c_host is null) return;
 			Send<RemovePeers>(new(new Peer((ushort)MyId!)), true);
-			CloseHostSocket();
+			CloseSocket(c_host);
 		}
-	}
-
-	private void CloseHostSocket()
-	{
-		Guard.Against.Null(c_host);
-		MessageQueue.Unsubscribe(c_host);
-		c_host.Dispose();
-		Peers.Clear();
 	}
 
 	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage
@@ -288,19 +282,25 @@ public sealed class Network
 				break;
 			case TargetKind.AllClients:
 				Guard.Against.NotHost(this);
-				foreach (Peer peer in Peers)
+				foreach (Peer peer in m_Peers)
 				{
 					MessageQueue.InvokeRemote(peer, message, reliable);
 				}
 				break;
 			case TargetKind.AllClientsExcept:
 				Guard.Against.NotHost(this);
-				foreach (Peer peer in Peers)
+				foreach (Peer peer in m_Peers)
 				{
 					if (peer == target.Peer) continue;
 					MessageQueue.InvokeRemote(peer, message, reliable);
 				}
 				break;
 		}
+	}
+
+	public void Dispose()
+	{
+		m_Peers.OfType<DirectPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
+		m_Peers.Clear();
 	}
 }

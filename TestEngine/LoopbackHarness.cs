@@ -1,21 +1,13 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Net;
+using FluentResults;
 using MessagePack;
 using NetModel;
 
 namespace TestEngine;
 
-internal sealed class LoopbackHarness : IAsyncDisposable
+internal sealed class LoopbackHarness : IDisposable
 {
-	private readonly List<P2PSocket> sockets = [];
-	private readonly List<Task> pollingTasks = [];
-	private readonly CancellationTokenSource cts = new();
+	private readonly HashSet<Network> networks = [];
 
 	public static async Task EventuallyAsync(
 		Func<bool> condition,
@@ -23,7 +15,7 @@ internal sealed class LoopbackHarness : IAsyncDisposable
 		int timeoutMs = 2000,
 		int stepMs = 10)
 	{
-		var started = Environment.TickCount64;
+		long started = Environment.TickCount64;
 
 		while (Environment.TickCount64 - started < timeoutMs)
 		{
@@ -39,187 +31,132 @@ internal sealed class LoopbackHarness : IAsyncDisposable
 		Assert.IsTrue(condition(), "Timed out waiting for condition.");
 	}
 
-	public SocketPair CreateSocketPair()
+	public async Task<ConnectedNetworkPair> CreateNetworkPairAsync(
+		Action<Network>? configure,
+		float punchTimeout = 15f)
 	{
-		P2PSocket left = new();
-		P2PSocket right = new();
-
-		left.BindAny();
-		right.BindAny();
-
-		left.SetRemote(new IPEndPoint(IPAddress.Loopback, right.LocalEndPoint.Port));
-		right.SetRemote(new IPEndPoint(IPAddress.Loopback, left.LocalEndPoint.Port));
-
-		sockets.Add(left);
-		sockets.Add(right);
-
-		pollingTasks.Add(left.StartPolling(cts.Token));
-		pollingTasks.Add(right.StartPolling(cts.Token));
-
-		return new SocketPair(left, right);
-	}
-
-	public ConnectedQueues CreateConnectedQueues<T>(
-		ushort messageKey,
-		Rpc<T> onLeft,
-		Rpc<T> onRight)
-		where T : class, IMessage
-	{
-		var pair = CreateSocketPair();
-
-		MessageRegistry leftRegistry = new();
-		MessageRegistry rightRegistry = new();
-
-		leftRegistry.Register(messageKey, onLeft);
-		rightRegistry.Register(messageKey, onRight);
-
-		leftRegistry.Freeze();
-		rightRegistry.Freeze();
-
-		MessageQueue leftQueue = new(leftRegistry);
-		MessageQueue rightQueue = new(rightRegistry);
-
-		DirectPeer leftRemote = new(2, pair.Left, pair.Left.RemoteEndPoint);
-		DirectPeer rightRemote = new(1, pair.Right, pair.Right.RemoteEndPoint);
-
-		leftQueue.Subscribe(leftRemote);
-		rightQueue.Subscribe(rightRemote);
-
-		return new ConnectedQueues(leftQueue, rightQueue, leftRemote, rightRemote);
-	}
-
-	public ConnectedNetworkPair CreateNetworkPair(
-		ushort clientId,
-		Action<Network>? configureHost = null,
-		Action<Network>? configureClient = null)
-	{
-		SocketPair pair = CreateSocketPair();
-
 		Network host = Network.ConstructHost();
 		Network client = Network.ConstructClient();
 
-		configureHost?.Invoke(host);
-		configureClient?.Invoke(client);
-
-		SetPrivateProperty(client, "MyId", clientId);
-
-		DirectPeer hostSidePeer = new(clientId, pair.Left, pair.Left.RemoteEndPoint);
-		DirectPeer clientHostPeer = new(0, pair.Right, pair.Right.RemoteEndPoint);
-
-		AttachPeer(host, hostSidePeer);
-		AttachPeer(client, clientHostPeer);
-		SetPrivateField(client, "c_host", clientHostPeer);
+		configure?.Invoke(host);
+		configure?.Invoke(client);
 
 		host.FinishSetup();
 		client.FinishSetup();
 
-		return new ConnectedNetworkPair(host, client, hostSidePeer, clientHostPeer);
+		networks.Add(host);
+		networks.Add(client);
+
+		ConnectedNetworkPair pair = await ConnectAsync(host, client, punchTimeout);
+
+		await EventuallyAsync(
+			condition: () => client.MyId == pair.Host.Peers[0].Id,
+			pump: Pump,
+			timeoutMs: 4000);
+
+		return pair;
 	}
 
-	public MultiClientNetwork CreateMultiClientNetwork(
-		params ushort[] clientIds)
+	public async Task<MultiClientNetwork> CreateMultiClientNetworkAsync(
+		int clientCount,
+		Action<Network>? configure = null,
+		float punchTimeout = 3f)
 	{
 		Network host = Network.ConstructHost();
-		var clients = new List<ConnectedNetworkPair>();
-
-		foreach (ushort clientId in clientIds)
-		{
-			SocketPair pair = CreateSocketPair();
-
-			Network client = Network.ConstructClient();
-			SetPrivateProperty(client, "MyId", clientId);
-
-			DirectPeer hostSidePeer = new(clientId, pair.Left, pair.Left.RemoteEndPoint);
-			DirectPeer clientHostPeer = new(0, pair.Right, pair.Right.RemoteEndPoint);
-
-			AttachPeer(host, hostSidePeer);
-			AttachPeer(client, clientHostPeer);
-			SetPrivateField(client, "c_host", clientHostPeer);
-
-			clients.Add(new ConnectedNetworkPair(host, client, hostSidePeer, clientHostPeer));
-		}
-
+		configure?.Invoke(host);
 		host.FinishSetup();
-		foreach (var client in clients)
-			client.Client.FinishSetup();
+
+		networks.Add(host);
+
+		List<Network> clients = [];
+
+		for (int i = 0; i < clientCount; i++)
+		{
+			Network client = Network.ConstructClient();
+			configure?.Invoke(client);
+			client.FinishSetup();
+
+			networks.Add(client);
+
+			await ConnectAsync(host, client, punchTimeout);
+			clients.Add(client);
+
+		}
+		await EventuallyAsync(
+			condition: () => clients.Select(n => n.MyId)
+						   .OfType<ushort>()
+						   .OrderBy(x => x)
+						   .SequenceEqual(host.Peers.Select(p => p.Id).OrderBy(x => x)),
+			pump: Pump,
+			timeoutMs: 4000);
 
 		return new MultiClientNetwork(host, clients);
 	}
 
-	public void Pump(params Network[] networks)
+	public void Pump()
 	{
 		foreach (Network network in networks)
 			network.Update();
 	}
 
-	private static void AttachPeer(Network network, DirectPeer peer)
+	private static async Task<ConnectedNetworkPair> ConnectAsync(
+	Network host,
+	Network client,
+	float punchTimeout)
 	{
-		object peers = GetPrivateField(network, "Peers")!;
-		object queue = GetPrivateField(network, "MessageQueue")!;
+		TaskCompletionSource<IPEndPoint> hostEndpoint =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		TaskCompletionSource<IPEndPoint> clientEndpoint =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		((IList)peers).Add(peer);
+		Task<Result<Peer>> admitTask = host.TryAdmit(
+			local: async ep => hostEndpoint.SetResult(await ep),
+			remote: () => clientEndpoint.Task,
+			punchTimeout: punchTimeout);
 
-		MethodInfo subscribe = queue.GetType().GetMethod("Subscribe", BindingFlags.Instance | BindingFlags.Public)!;
-		subscribe.Invoke(queue, [peer]);
+		Task<Result<Peer>> joinTask = client.TryJoin(
+			local: async ep => clientEndpoint.SetResult(await ep),
+			remote: () => hostEndpoint.Task,
+			punchTimeout: punchTimeout);
+
+		await Task.WhenAll(admitTask, joinTask);
+
+		Assert.IsTrue(admitTask.Result.IsSuccess,
+			string.Join(Environment.NewLine, admitTask.Result.Errors.Select(e => e.Message)));
+		Assert.IsTrue(joinTask.Result.IsSuccess,
+			string.Join(Environment.NewLine, joinTask.Result.Errors.Select(e => e.Message)));
+
+		return new ConnectedNetworkPair(
+			host,
+			client);
 	}
 
-	private static object? GetPrivateField(object instance, string name)
+	private static void AssertResult<T>(Result<T> result, string prefix)
 	{
-		return instance.GetType()
-			.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!
-			.GetValue(instance);
+		if (result.IsSuccess)
+			return;
+
+		string message = string.Join(
+			Environment.NewLine,
+			result.Errors.Select(e => e.Message));
+
+		Assert.Fail($"{prefix}{Environment.NewLine}{message}");
 	}
 
-	private static void SetPrivateField(object instance, string name, object? value)
+	public void Dispose()
 	{
-		instance.GetType()
-			.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!
-			.SetValue(instance, value);
+		foreach (Network network in networks)
+			network.Dispose();
+		networks.Clear();
 	}
-
-	private static void SetPrivateProperty(object instance, string name, object? value)
-	{
-		instance.GetType()
-			.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
-			.SetValue(instance, value);
-	}
-
-	public async ValueTask DisposeAsync()
-	{
-		cts.Cancel();
-
-		try
-		{
-			await Task.WhenAll(pollingTasks);
-		}
-		catch
-		{
-			// ignored for teardown
-		}
-
-		foreach (var socket in sockets)
-			socket.Dispose();
-
-		cts.Dispose();
-	}
-
-	internal readonly record struct SocketPair(P2PSocket Left, P2PSocket Right);
-
-	internal readonly record struct ConnectedQueues(
-		MessageQueue LeftQueue,
-		MessageQueue RightQueue,
-		DirectPeer LeftRemote,
-		DirectPeer RightRemote);
 
 	internal readonly record struct ConnectedNetworkPair(
 		Network Host,
-		Network Client,
-		DirectPeer HostSidePeer,
-		DirectPeer ClientHostPeer);
+		Network Client);
 
 	internal sealed record MultiClientNetwork(
 		Network Host,
-		IReadOnlyList<ConnectedNetworkPair> Clients);
+		IReadOnlyList<Network> Clients);
 }
 
 [MessagePackObject(AllowPrivate = true)]

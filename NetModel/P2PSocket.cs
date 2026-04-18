@@ -130,17 +130,26 @@ public class P2PSocket : IDisposable
 
 		await _socket.SendToAsync(sendBuffer, SocketFlags.None, stunEP);
 
-		int read = await Task.Run(() =>
+		//int read = await Task.Run(() =>
+		//{
+		//	var oldTimeout = _socket.ReceiveTimeout;
+		//	var oldBlocking = _socket.Blocking;
+		//	_socket.Blocking = true;
+		//	_socket.ReceiveTimeout = 5000;
+		//	int read = _socket.Receive(recBuffer);
+		//	_socket.Blocking = oldBlocking;
+		//	_socket.ReceiveTimeout = oldTimeout;
+		//	return read;
+		//});
+
+		int read;
+		try
 		{
-			var oldTimeout = _socket.ReceiveTimeout;
-			var oldBlocking = _socket.Blocking;
-			_socket.Blocking = true;
-			_socket.ReceiveTimeout = 5000;
-			int read = _socket.Receive(recBuffer);
-			_socket.Blocking = oldBlocking;
-			_socket.ReceiveTimeout = oldTimeout;
-			return read;
-		});
+			read = await _socket.ReceiveAsync(recBuffer, SocketFlags.None);
+		} catch (SocketException e) when (e.SocketErrorCode is SocketError.OperationAborted)
+		{
+			throw new OperationCanceledException("STUN was cancelled", e);
+		}
 
 		if (read == 0) throw new Exception("No response");
 

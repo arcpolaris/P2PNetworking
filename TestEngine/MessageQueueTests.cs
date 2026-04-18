@@ -1,5 +1,4 @@
-﻿// TestEngine/MessageQueueTests.cs
-using NetModel;
+﻿using NetModel;
 
 namespace TestEngine;
 
@@ -7,65 +6,53 @@ namespace TestEngine;
 public sealed class MessageQueueTests
 {
 	[TestMethod]
-	public async Task InvokeRemote_UnreliableMessage_DeliversOverLoopback()
+	public async Task Send_UnreliableMessage_DeliversOverNetworkPair()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		Peer? sender = null;
 		TestMessage? received = null;
+		Peer? sender = null;
 
-		var queues = harness.CreateConnectedQueues<TestMessage>(
-			100,
-			onLeft: (_, _) => { },
-			onRight: (from, msg) =>
+		var pair = await harness.CreateNetworkPairAsync(net =>
+		{
+			net.Register<TestMessage>(100, (from, msg) =>
 			{
 				sender = from;
 				received = msg;
 			});
+		});
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new TestMessage { Text = "hello", Number = 7 });
+		pair.Host.SendTo(pair.Host.Peers[0], new TestMessage { Text = "hello", Number = 7 });
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => received is not null,
-			pump: () =>
-			{
-				queues.LeftQueue.SendFrame();
-				queues.RightQueue.ProcessFrame();
-			});
+			pump: harness.Pump);
 
 		Assert.IsNotNull(received);
 		Assert.AreEqual("hello", received.Text);
 		Assert.AreEqual(7, received.Number);
 		Assert.IsNotNull(sender);
-		Assert.AreEqual(1, sender.Id);
+		Assert.AreEqual((ushort)0, sender.Id);
 	}
 
 	[TestMethod]
-	public async Task InvokeRemote_ReliableMessage_DeliversOverLoopback()
+	public async Task Send_ReliableMessage_DeliversOverNetworkPair()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var deliveries = new List<TestMessage>();
+		List<TestMessage> deliveries = [];
 
-		var queues = harness.CreateConnectedQueues<TestMessage>(
-			100,
-			onLeft: (_, _) => { },
-			onRight: (_, msg) => deliveries.Add(msg));
+		var pair = await harness.CreateNetworkPairAsync(net =>
+			net.Register<TestMessage>(100, (_, msg) => deliveries.Add(msg)));
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
+		pair.Host.SendTo(
+			pair.Host.Peers[0],
 			new TestMessage { Text = "reliable", Number = 1 },
 			reliable: true);
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => deliveries.Count == 1,
-			pump: () =>
-			{
-				queues.LeftQueue.SendFrame();
-				queues.RightQueue.ProcessFrame();
-			});
+			pump: harness.Pump);
 
 		Assert.AreEqual(1, deliveries.Count);
 		Assert.AreEqual("reliable", deliveries[0].Text);
@@ -73,36 +60,24 @@ public sealed class MessageQueueTests
 	}
 
 	[TestMethod]
-	public async Task InvokeRemote_MultipleMessagesInSamePacket_PreservesAppendOrder()
+	public async Task Send_MultipleMessagesInSameDirection_PreservesAppendOrder()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var deliveries = new List<string>();
+		List<string> deliveries = [];
 
-		var queues = harness.CreateConnectedQueues<OrderedMessage>(
-			101,
-			onLeft: (_, _) => { },
-			onRight: (_, msg) => deliveries.Add(msg.Label));
+		var pair = await harness.CreateNetworkPairAsync(net =>
+			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new OrderedMessage { Label = "first" });
+		Peer clientPeer = pair.Host.Peers[0];
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new OrderedMessage { Label = "second" });
-
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new OrderedMessage { Label = "third" });
+		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "first" });
+		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "second" });
+		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "third" });
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => deliveries.Count == 3,
-			pump: () =>
-			{
-				queues.LeftQueue.SendFrame();
-				queues.RightQueue.ProcessFrame();
-			});
+			pump: harness.Pump);
 
 		CollectionAssert.AreEqual(
 			new[] { "first", "second", "third" },
@@ -110,56 +85,42 @@ public sealed class MessageQueueTests
 	}
 
 	[TestMethod]
-	public async Task InvokeRemote_MixedReliableAndUnreliable_PreservesLogicalOrderAcrossPackets()
+	public async Task Send_MixedReliableAndUnreliable_DeliversBothMessages()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var deliveries = new List<string>();
+		List<string> deliveries = [];
 
-		var queues = harness.CreateConnectedQueues<OrderedMessage>(
-			101,
-			onLeft: (_, _) => { },
-			onRight: (_, msg) => deliveries.Add(msg.Label));
+		var pair = await harness.CreateNetworkPairAsync(net =>
+			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new OrderedMessage { Label = "unreliable" },
-			reliable: false);
+		Peer clientPeer = pair.Host.Peers[0];
 
-		queues.LeftQueue.InvokeRemote(
-			queues.LeftRemote,
-			new OrderedMessage { Label = "reliable" },
-			reliable: true);
+		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "unreliable" }, reliable: false);
+		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "reliable" }, reliable: true);
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => deliveries.Count == 2,
-			pump: () =>
-			{
-				queues.LeftQueue.SendFrame();
-				queues.RightQueue.ProcessFrame();
-			});
+			pump: harness.Pump);
 
-		CollectionAssert.AreEqual(
-			new[] { "reliable", "unreliable" },
+		CollectionAssert.AreEquivalent(
+			new[] { "unreliable", "reliable" },
 			deliveries);
 	}
 
 	[TestMethod]
-	public async Task SendFrame_WithNoQueuedMessages_StillSendsKeepAlivePacketWithoutCrashing()
+	public async Task Update_WithNoQueuedMessages_DoesNotDeliverPhantomMessagesOrCrash()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
 		int deliveries = 0;
 
-		var queues = harness.CreateConnectedQueues<TestMessage>(
-			100,
-			onLeft: (_, _) => { },
-			onRight: (_, _) => deliveries++);
+		await harness.CreateNetworkPairAsync(net =>
+			net.Register<TestMessage>(100, (_, _) => deliveries++));
 
 		for (int i = 0; i < 5; i++)
 		{
-			queues.LeftQueue.SendFrame();
-			queues.RightQueue.ProcessFrame();
+			harness.Pump();
 			await Task.Delay(10);
 		}
 
@@ -167,76 +128,53 @@ public sealed class MessageQueueTests
 	}
 
 	[TestMethod]
-	public async Task BidirectionalTraffic_BothQueuesCanSendOnSameLoopbackPair()
+	public async Task BidirectionalTraffic_BothNetworksCanSendAcrossSameConnection()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var leftSeen = new List<string>();
-		var rightSeen = new List<string>();
+		List<string> hostSeen = [];
+		List<string> clientSeen = [];
 
-		var pair = harness.CreateSocketPair();
+		var pair = await harness.CreateNetworkPairAsync(net =>
+			net.Register<OrderedMessage>(101, (from, msg) =>
+			{
+				if (from.Id == 0)
+					clientSeen.Add(msg.Label);
+				else
+					hostSeen.Add(msg.Label);
+			}));
 
-		MessageRegistry leftRegistry = new();
-		MessageRegistry rightRegistry = new();
-
-		leftRegistry.Register<OrderedMessage>(101, (_, msg) => leftSeen.Add(msg.Label));
-		rightRegistry.Register<OrderedMessage>(101, (_, msg) => rightSeen.Add(msg.Label));
-
-		leftRegistry.Freeze();
-		rightRegistry.Freeze();
-
-		MessageQueue leftQueue = new(leftRegistry);
-		MessageQueue rightQueue = new(rightRegistry);
-
-		DirectPeer leftRemote = new(2, pair.Left, pair.Left.RemoteEndPoint);
-		DirectPeer rightRemote = new(1, pair.Right, pair.Right.RemoteEndPoint);
-
-		leftQueue.Subscribe(leftRemote);
-		rightQueue.Subscribe(rightRemote);
-
-		leftQueue.InvokeRemote(leftRemote, new OrderedMessage { Label = "L->R" });
-		rightQueue.InvokeRemote(rightRemote, new OrderedMessage { Label = "R->L" });
+		pair.Host.SendTo(pair.Host.Peers[0], new OrderedMessage { Label = "H->C" });
+		pair.Client.Send(new OrderedMessage { Label = "C->H" });
 
 		await LoopbackHarness.EventuallyAsync(
-			condition: () => leftSeen.Count == 1 && rightSeen.Count == 1,
-			pump: () =>
-			{
-				leftQueue.SendFrame();
-				rightQueue.SendFrame();
-				leftQueue.ProcessFrame();
-				rightQueue.ProcessFrame();
-			});
+			condition: () => hostSeen.Count == 1 && clientSeen.Count == 1,
+			pump: harness.Pump);
 
-		CollectionAssert.AreEqual(new[] { "R->L" }, leftSeen);
-		CollectionAssert.AreEqual(new[] { "L->R" }, rightSeen);
+		CollectionAssert.AreEqual(new[] { "C->H" }, hostSeen);
+		CollectionAssert.AreEqual(new[] { "H->C" }, clientSeen);
 	}
 
 	[TestMethod]
-	public async Task FormatterPath_PacketWithSeveralMessages_RoundTripsThroughLoopback()
+	public async Task Send_ManyMessages_RoundTripsThroughNetworkTransport()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var deliveries = new List<string>();
+		List<string> deliveries = [];
 
-		var queues = harness.CreateConnectedQueues<OrderedMessage>(
-			101,
-			onLeft: (_, _) => { },
-			onRight: (_, msg) => deliveries.Add(msg.Label));
+		var pair = await harness.CreateNetworkPairAsync(net =>
+			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
+
+		Peer clientPeer = pair.Host.Peers[0];
 
 		for (int i = 0; i < 6; i++)
 		{
-			queues.LeftQueue.InvokeRemote(
-				queues.LeftRemote,
-				new OrderedMessage { Label = $"m{i}" });
+			pair.Host.SendTo(clientPeer, new OrderedMessage { Label = $"m{i}" });
 		}
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => deliveries.Count == 6,
-			pump: () =>
-			{
-				queues.LeftQueue.SendFrame();
-				queues.RightQueue.ProcessFrame();
-			});
+			pump: harness.Pump);
 
 		CollectionAssert.AreEqual(
 			new[] { "m0", "m1", "m2", "m3", "m4", "m5" },

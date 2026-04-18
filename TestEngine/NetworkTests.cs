@@ -1,199 +1,251 @@
-﻿// TestEngine/NetworkTests.cs
+﻿using System.Linq;
 using NetModel;
 
 namespace TestEngine;
 
 [TestClass]
-public sealed class NetworkTests
+public sealed class A_NetworkTests
 {
-	[TestMethod]
-	public async Task HostSendTo_ClientReceivesOverLoopback()
+	[TestMethod, Priority(0)]
+	public async Task TryJoin_AssignsClientId_AndExposesHostPeer()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
+
+		var pair = await harness.CreateNetworkPairAsync(configure: null);
+
+		Assert.IsNotNull(pair.Client.Host);
+		Assert.AreEqual((ushort)0, pair.Client.Host!.Id);
+		Assert.AreEqual((ushort)0, pair.Host.MyId);
+		Assert.AreEqual(1, pair.Host.Peers.Count);
+		Assert.AreEqual(pair.Client.MyId, pair.Host.Peers[0].Id);
+	}
+
+	[TestMethod]
+	public async Task HostSend_ClientReceivesOverLoopback()
+	{
+		using LoopbackHarness harness = new();
 
 		TestMessage? received = null;
 		Peer? sender = null;
 
-		var pair = harness.CreateNetworkPair(
-			clientId: 1,
-			configureClient: client =>
+		var pair = await harness.CreateNetworkPairAsync(
+			net =>
 			{
-				client.Register<TestMessage>(100, (from, msg) =>
+				if (!net.IsHost)
 				{
-					sender = from;
-					received = msg;
-				});
+					net.Register<TestMessage>(100, (from, msg) =>
+					{
+						sender = from;
+						received = msg;
+					});
+				}
 			});
 
-		pair.Host.SendTo(
-			pair.HostSidePeer,
-			new TestMessage { Text = "host->client", Number = 10 });
+		pair.Host.Send(new TestMessage
+		{
+			Text = "host->client",
+			Number = 10
+		});
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => received is not null,
-			pump: () => harness.Pump(pair.Host, pair.Client));
+			pump: harness.Pump);
 
 		Assert.IsNotNull(received);
+		Assert.IsNotNull(sender);
 		Assert.AreEqual("host->client", received.Text);
 		Assert.AreEqual(10, received.Number);
-		Assert.IsNotNull(sender);
-		Assert.AreEqual(0, sender.Id);
+		Assert.AreEqual((ushort)0, sender.Id);
 	}
 
 	[TestMethod]
 	public async Task ClientSend_HostReceivesOverLoopback()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
 		TestMessage? received = null;
 		Peer? sender = null;
 
-		var pair = harness.CreateNetworkPair(
-			clientId: 1,
-			configureHost: host =>
+		var pair = await harness.CreateNetworkPairAsync(
+			net =>
 			{
-				host.Register<TestMessage>(100, (from, msg) =>
+				if (net.IsHost)
 				{
-					sender = from;
-					received = msg;
-				});
+					net.Register<TestMessage>(100, (from, msg) =>
+					{
+						sender = from;
+						received = msg;
+					});
+				}
 			});
 
-		pair.Client.Send(new TestMessage { Text = "client->host", Number = 11 });
+		pair.Client.Send(new TestMessage
+		{
+			Text = "client->host",
+			Number = 11
+		});
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => received is not null,
-			pump: () => harness.Pump(pair.Host, pair.Client));
+			pump: harness.Pump);
 
 		Assert.IsNotNull(received);
+		Assert.IsNotNull(sender);
 		Assert.AreEqual("client->host", received.Text);
 		Assert.AreEqual(11, received.Number);
-		Assert.IsNotNull(sender);
-		Assert.AreEqual(1, sender.Id);
+		Assert.AreEqual(pair.Client.MyId, sender.Id);
 	}
 
 	[TestMethod]
 	public async Task HostBroadcast_AllClientsReceiveOverLoopback()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var seenByClient1 = new List<string>();
-		var seenByClient2 = new List<string>();
+		List<string>[] seenByClient =
+		[
+			[],
+			[]
+		];
 
-		var topo = harness.CreateMultiClientNetwork(1, 2);
+		int configuredClients = 0;
+		var topo = await harness.CreateMultiClientNetworkAsync(
+			2,
+			net =>
+			{
+				if (net.IsHost)
+					return;
 
-		topo.Clients[0].Client.Register<OrderedMessage>(101, (_, msg) => seenByClient1.Add(msg.Label));
-		topo.Clients[1].Client.Register<OrderedMessage>(101, (_, msg) => seenByClient2.Add(msg.Label));
-
-		topo.Host.FinishSetup();
-		topo.Clients[0].Client.FinishSetup();
-		topo.Clients[1].Client.FinishSetup();
+				int clientIndex = configuredClients++;
+				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
+			});
 
 		topo.Host.Send(new OrderedMessage { Label = "broadcast" });
 
 		await LoopbackHarness.EventuallyAsync(
-			condition: () => seenByClient1.Count == 1 && seenByClient2.Count == 1,
-			pump: () =>
-			{
-				harness.Pump(topo.Host, topo.Clients[0].Client, topo.Clients[1].Client);
-			});
+			condition: () => seenByClient[0].Count == 1 && seenByClient[1].Count == 1,
+			pump: harness.Pump);
 
-		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient1);
-		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient2);
+		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient[0]);
+		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient[1]);
+		Assert.AreEqual((ushort)1, topo.Clients[0].MyId);
+		Assert.AreEqual((ushort)2, topo.Clients[1].MyId);
 	}
 
 	[TestMethod]
 	public async Task HostSendToAllExcept_ExcludedClientDoesNotReceive()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var seenByClient1 = new List<string>();
-		var seenByClient2 = new List<string>();
+		List<string>[] seenByClient =
+		[
+			[],
+			[]
+		];
 
-		var topo = harness.CreateMultiClientNetwork(1, 2);
-
-		topo.Clients[0].Client.Register<OrderedMessage>(101, (_, msg) => seenByClient1.Add(msg.Label));
-		topo.Clients[1].Client.Register<OrderedMessage>(101, (_, msg) => seenByClient2.Add(msg.Label));
-
-		topo.Host.FinishSetup();
-		topo.Clients[0].Client.FinishSetup();
-		topo.Clients[1].Client.FinishSetup();
-
-		DirectPeer excludedPeer = topo.Clients[0].HostSidePeer;
-
-		topo.Host.SendToAllExcept(
-			excludedPeer,
-			new OrderedMessage { Label = "everyone-but-1" });
-
-		await LoopbackHarness.EventuallyAsync(
-			condition: () => seenByClient2.Count == 1,
-			pump: () =>
+		int configuredClients = 0;
+		var topo = await harness.CreateMultiClientNetworkAsync(
+			2,
+			net =>
 			{
-				harness.Pump(topo.Host, topo.Clients[0].Client, topo.Clients[1].Client);
+				if (net.IsHost)
+					return;
+
+				int clientIndex = configuredClients++;
+				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
 			});
 
-		Assert.AreEqual(0, seenByClient1.Count);
-		CollectionAssert.AreEqual(new[] { "everyone-but-1" }, seenByClient2);
+		Peer excludedPeer = topo.Host.Peers.Single(p => p.Id == topo.Clients[0].MyId);
+		topo.Host.SendToAllExcept(excludedPeer, new OrderedMessage { Label = "everyone-but-1" });
+
+		await LoopbackHarness.EventuallyAsync(
+			condition: () => seenByClient[1].Count == 1,
+			pump: harness.Pump);
+
+		Assert.AreEqual(0, seenByClient[0].Count);
+		CollectionAssert.AreEqual(new[] { "everyone-but-1" }, seenByClient[1]);
 	}
 
 	[TestMethod]
-	public async Task ClientPing_TriggersDefaultPong_AndUpdatesHostRtt()
+	public async Task TryJoin_DefaultPingPong_UpdatesClientRtt()
 	{
-		await using LoopbackHarness harness = new();
+		using LoopbackHarness harness = new();
 
-		var pair = harness.CreateNetworkPair(clientId: 1);
-
-		pair.Client.Send(new Ping(), reliable: false);
+		var pair = await harness.CreateNetworkPairAsync(configure: null);
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () =>
 			{
 				try
 				{
-					_ = pair.Host.RTT(pair.HostSidePeer);
+					_ = pair.Client.RTT(pair.Client.Host!);
 					return true;
 				}
-				catch
+				catch (KeyNotFoundException)
 				{
 					return false;
 				}
 			},
-			pump: () => harness.Pump(pair.Host, pair.Client),
+			pump: harness.Pump,
 			timeoutMs: 3000);
 
-		uint rtt = pair.Host.RTT(pair.HostSidePeer);
+		uint rtt = pair.Client.RTT(pair.Client.Host!);
 		Assert.IsTrue(rtt <= 5_000);
 	}
 
 	[TestMethod]
-	public void Close_ClientWithNoHost_IsSafeNoOp()
+	public async Task Kick_RemovesOnlyTargetedClientFromFurtherDelivery()
 	{
-		Network client = Network.ConstructClient();
-		client.Close();
+		using LoopbackHarness harness = new();
+
+		List<string>[] seenByClient =
+		[
+			[],
+			[]
+		];
+
+		int configuredClients = 0;
+		var topo = await harness.CreateMultiClientNetworkAsync(
+			2,
+			net =>
+			{
+				if (net.IsHost)
+					return;
+
+				int clientIndex = configuredClients++;
+				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
+			});
+
+		Peer removedPeer = topo.Host.Peers.Single(p => p.Id == topo.Clients[0].MyId);
+		topo.Host.Kick(removedPeer);
+
+		await LoopbackHarness.EventuallyAsync(
+			condition: () => topo.Host.Peers.Count == 1 && topo.Clients[1].Peers.Count == 1,
+			pump: harness.Pump,
+			timeoutMs: 1000);
+
+		topo.Host.Send(new OrderedMessage { Label = "after-kick" });
+
+		await LoopbackHarness.EventuallyAsync(
+			condition: () => seenByClient[1].Count == 1,
+			pump: harness.Pump);
+
+		Assert.AreEqual(0, seenByClient[0].Count);
+		CollectionAssert.AreEqual(new[] { "after-kick" }, seenByClient[1]);
 	}
 
 	[TestMethod]
-	public void Close_HostWithNoPeers_IsSafeNoOp()
+	public void Disconnect_ClientWithNoHost_IsSafeNoOp()
 	{
-		Network host = Network.ConstructHost();
-		host.Close();
+		using Network client = Network.ConstructClient();
+		client.FinishSetup();
+		client.Disconnect();
 	}
 
 	[TestMethod]
-	public void HostProperty_OnClient_ReturnsConfiguredHostPeer()
+	public void Disconnect_HostWithNoPeers_IsSafeNoOp()
 	{
-		using var socket = new P2PSocket();
-		socket.BindAny();
-		socket.SetRemote(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, socket.LocalEndPoint.Port));
-
-		Network client = Network.ConstructClient();
-
-		var hostPeer = new DirectPeer(0, socket, socket.RemoteEndPoint);
-
-		typeof(Network)
-			.GetField("c_host", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-			.SetValue(client, hostPeer);
-
-		Assert.AreSame(hostPeer, client.Host);
+		using Network host = Network.ConstructHost();
+		host.FinishSetup();
+		host.Disconnect();
 	}
 }
