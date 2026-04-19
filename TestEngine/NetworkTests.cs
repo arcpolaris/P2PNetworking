@@ -1,17 +1,18 @@
-﻿using System.Linq;
+﻿using System.Diagnostics;
+using System.Linq;
 using NetModel;
 
 namespace TestEngine;
 
 [TestClass]
-public sealed class A_NetworkTests
+public sealed class NetworkTests
 {
-	[TestMethod, Priority(0)]
+	[TestMethod]
 	public async Task TryJoin_AssignsClientId_AndExposesHostPeer()
 	{
 		using LoopbackHarness harness = new();
 
-		var pair = await harness.CreateNetworkPairAsync(configure: null);
+		var pair = await harness.CreateNetworkPairAsync(configure: null, 3f);
 
 		Assert.IsNotNull(pair.Client.Host);
 		Assert.AreEqual((ushort)0, pair.Client.Host!.Id);
@@ -21,24 +22,36 @@ public sealed class A_NetworkTests
 	}
 
 	[TestMethod]
+	public async Task CreateNetworkPairTwice()
+	{
+		static async Task PairOnce()
+		{
+			using LoopbackHarness harness = new();
+			var pair = await harness.CreateNetworkPairAsync(null, 3f);
+			Debug.WriteLine("Host {0}", ((DirectPeer)pair.Host.Peers[0]).Socket.LocalEndPoint);
+			Debug.WriteLine("Client {0}", ((DirectPeer)pair.Client.Peers[0]).Socket.LocalEndPoint);
+		}
+
+		await PairOnce();
+		await PairOnce();
+	}
+
+	[TestMethod]
 	public async Task HostSend_ClientReceivesOverLoopback()
 	{
 		using LoopbackHarness harness = new();
 
-		TestMessage? received = null;
+		TestMessage? received = null;	
 		Peer? sender = null;
 
 		var pair = await harness.CreateNetworkPairAsync(
 			net =>
 			{
-				if (!net.IsHost)
+				net.Register<TestMessage>(100, (from, msg) =>
 				{
-					net.Register<TestMessage>(100, (from, msg) =>
-					{
-						sender = from;
-						received = msg;
-					});
-				}
+					sender = from;
+					received = msg;
+				});
 			});
 
 		pair.Host.Send(new TestMessage
@@ -69,14 +82,11 @@ public sealed class A_NetworkTests
 		var pair = await harness.CreateNetworkPairAsync(
 			net =>
 			{
-				if (net.IsHost)
+				net.Register<TestMessage>(100, (from, msg) =>
 				{
-					net.Register<TestMessage>(100, (from, msg) =>
-					{
-						sender = from;
-						received = msg;
-					});
-				}
+					sender = from;
+					received = msg;
+				});
 			});
 
 		pair.Client.Send(new TestMessage
@@ -113,10 +123,9 @@ public sealed class A_NetworkTests
 			net =>
 			{
 				if (net.IsHost)
-					return;
-
-				int clientIndex = configuredClients++;
-				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
+					net.Register<OrderedMessage>(101, (_, _) => { });
+				else
+					net.Register<OrderedMessage>(101, (_, msg) => seenByClient[configuredClients++].Add(msg.Label));
 			});
 
 		topo.Host.Send(new OrderedMessage { Label = "broadcast" });
@@ -148,10 +157,9 @@ public sealed class A_NetworkTests
 			net =>
 			{
 				if (net.IsHost)
-					return;
-
-				int clientIndex = configuredClients++;
-				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
+					net.Register<OrderedMessage>(101, (_, _) => { });
+				else
+					net.Register<OrderedMessage>(101, (_, msg) => seenByClient[configuredClients++].Add(msg.Label));
 			});
 
 		Peer excludedPeer = topo.Host.Peers.Single(p => p.Id == topo.Clients[0].MyId);
@@ -185,7 +193,10 @@ public sealed class A_NetworkTests
 					return false;
 				}
 			},
-			pump: harness.Pump,
+			pump: () =>
+			{
+				harness.Pump();
+			},
 			timeoutMs: 3000);
 
 		uint rtt = pair.Client.RTT(pair.Client.Host!);

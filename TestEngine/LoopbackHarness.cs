@@ -110,13 +110,13 @@ internal sealed class LoopbackHarness : IDisposable
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		Task<Result<Peer>> admitTask = host.TryAdmit(
-			local: async ep => hostEndpoint.SetResult(await ep),
-			remote: () => clientEndpoint.Task,
+			local: hostEndpoint.SetResult,
+			remote: clientEndpoint.Task,
 			punchTimeout: punchTimeout);
 
 		Task<Result<Peer>> joinTask = client.TryJoin(
-			local: async ep => clientEndpoint.SetResult(await ep),
-			remote: () => hostEndpoint.Task,
+			local: clientEndpoint.SetResult,
+			remote: hostEndpoint.Task,
 			punchTimeout: punchTimeout);
 
 		await Task.WhenAll(admitTask, joinTask);

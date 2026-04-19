@@ -7,6 +7,7 @@ using System.Net;
 using System.Threading;
 using System.Linq;
 using ObservableCollections;
+using System.Text;
 
 namespace NetModel;
 
@@ -127,20 +128,21 @@ public sealed class Network : IDisposable
 		MessageRegistry.Freeze();
 	}
 
-	private static async Task<Result<P2PSocket>> TryUplink(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout)
+	private static async Task<Result<P2PSocket>> TryUplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
 		P2PSocket socket = new();
 		socket.BindAny();
-		local(socket.STUN());
-		socket.SetRemote(await remote());
+		IPEndPoint stun = await socket.STUN();
+		local(stun);
+		var remoteEP = await remote;
+		socket.SetRemote(remoteEP);
 
 		bool got_msg = false; // our hole is punched
 
 		//if either peer gets an ack, we're good
-
-		//random garbage
-		byte[] msg = [0x0f, 0x27, 0xdc, 0x1b, 0xa1, 0x3c, 0x6c, 0xa5];
-		byte[] ack = [0x36, 0xe5, 0xc7, 0xd5, 0xa6, 0x43, 0xc4, 0xff];
+		;
+		byte[] msg = "MESSAGE_"u8.ToArray();
+		byte[] ack = "ACKNKOLG"u8.ToArray();
 
 		byte[] GetProbe() => got_msg ? ack : msg;
 
@@ -173,7 +175,7 @@ public sealed class Network : IDisposable
 	}
 
 	// VERY NOT THREAD SAFE
-	public async Task<Result<Peer>> TryAdmit(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout = 30f)
+	public async Task<Result<Peer>> TryAdmit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		Guard.Against.NotHost(this);
 
@@ -194,7 +196,7 @@ public sealed class Network : IDisposable
 	}
 
 
-	public async Task<Result<Peer>> TryJoin(Action<Task<IPEndPoint>> local, Func<Task<IPEndPoint>> remote, float punchTimeout = 30f)
+	public async Task<Result<Peer>> TryJoin(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		Guard.Against.NotClient(this);
 
@@ -215,6 +217,7 @@ public sealed class Network : IDisposable
 
 	public void Update()
 	{
+		Send(new Ping());
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
 	}
