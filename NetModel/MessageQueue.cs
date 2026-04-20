@@ -21,6 +21,7 @@ internal class MessageQueue
 			};
 
 			Peer = peer;
+			LastPing = DateTime.UnixEpoch;
 		}
 
 		public void UpdateTimestamps()
@@ -38,6 +39,7 @@ internal class MessageQueue
 
 		// outbound btw
 		public int Timestamp { get; set; }
+		public DateTime LastPing { get; set; }
 	}
 
 	private Dictionary<NetKey, PeerInfo> buffers = [];
@@ -91,9 +93,19 @@ internal class MessageQueue
 		{
 			info.UpdateTimestamps();
 
-			// even if there's nothing to send, unreliable is our keep-alive packet
-			byte[] outbound = registry.Marshal(info.Outbound);
-			info.Peer.Socket.Send(outbound);
+			if (DateTime.UtcNow.Subtract(info.LastPing) >= TimeSpan.FromSeconds(0.1))
+			{
+				InvokeRemote(info.Peer, new Ping());
+				info.LastPing = DateTime.UtcNow;
+			}
+
+			if (info.Outbound.Messages.Count > 0)
+			{
+				byte[] outbound = registry.Marshal(info.Outbound);
+				info.Peer.Socket.Send(outbound);
+
+				info.Outbound = new Packet() { IsReliable = false };
+			}
 
 			if (info.OutboundReliable.Messages.Count > 0)
 			{
@@ -102,8 +114,6 @@ internal class MessageQueue
 
 				info.OutboundReliable = new Packet { IsReliable = true };
 			}
-
-			info.Outbound = new Packet() { IsReliable = false };
 		}
 	}
 

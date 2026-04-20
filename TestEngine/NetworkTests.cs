@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Diagnostics;
+using System.Linq;
 using NetModel;
 
 namespace TestEngine;
@@ -129,32 +130,39 @@ public sealed class NetworkTests
 	{
 		using LoopbackHarness harness = new();
 
-		List<string>[] seenByClient =
-		[
-			[],
-			[]
-		];
+		Dictionary<ushort, List<string>> seenByClient = [];
 
-		int configuredClients = 0;
 		var topo = await harness.CreateMultiClientNetworkAsync(
 			2,
 			net =>
 			{
-				if (net.IsHost)
-					net.Register<OrderedMessage>(101, (_, _) => { });
-				else
-					net.Register<OrderedMessage>(101, (_, msg) => seenByClient[configuredClients++].Add(msg.Label));
+				net.Register<OrderedMessage>(101, (_, msg) =>
+				{
+					if (!seenByClient.ContainsKey((ushort)net.MyId!)) seenByClient.Add((ushort)net.MyId, []);
+					seenByClient[(ushort)net.MyId!].Add(msg.Label);
+				});
 			});
 
-		Peer excludedPeer = topo.Host.Peers.Single(p => p.Id == topo.Clients[0].MyId);
+		Peer excludedPeer = topo.Host.Peers[1];
+
+		//TODO: this sucks
+		for (int i = 0; i < 100; i++)
+		{
+			harness.Pump();
+			await Task.Delay(10);
+		}
 		topo.Host.SendToAllExcept(excludedPeer, new OrderedMessage { Label = "everyone-but-1" });
 
 		await LoopbackHarness.EventuallyAsync(
-			condition: () => seenByClient[1].Count == 1,
+			condition: () =>
+			{
+				Debug.WriteLine(string.Join(", ", seenByClient.Select(kvp => $"{kvp.Key}:{kvp.Value.Count}")));
+				return seenByClient.TryGetValue(topo.Host.Peers[0].Id, out var list) && list.Count == 1;
+			},
 			pump: harness.Pump);
 
-		Assert.AreEqual(0, seenByClient[0].Count);
-		CollectionAssert.AreEqual(new[] { "everyone-but-1" }, seenByClient[1]);
+		Assert.IsFalse(seenByClient.ContainsKey(topo.Host.Peers[1].Id));
+		CollectionAssert.AreEqual(new[] { "everyone-but-1" }, seenByClient[topo.Host.Peers[0].Id]);
 	}
 
 	[TestMethod]
@@ -201,17 +209,29 @@ public sealed class NetworkTests
 			net =>
 			{
 				if (net.IsHost)
+				{
+					net.Register<OrderedMessage>(101, (_, _) => { });
 					return;
+				}
 
 				int clientIndex = configuredClients++;
 				net.Register<OrderedMessage>(101, (_, msg) => seenByClient[clientIndex].Add(msg.Label));
 			});
 
+
 		Peer removedPeer = topo.Host.Peers.Single(p => p.Id == topo.Clients[0].MyId);
 		topo.Host.Kick(removedPeer);
+		topo.Host.Update();
+
+		//TODO: implement reliable messages so i don't have to do ts
+		await Task.Delay(100);
 
 		await LoopbackHarness.EventuallyAsync(
-			condition: () => topo.Host.Peers.Count == 1 && topo.Clients[1].Peers.Count == 1,
+			condition: () =>
+			{
+				Debug.WriteLine($"{topo.Host.Peers.Count} | {topo.Clients[1].Peers.Count}");
+				return topo.Host.Peers.Count == 1 && topo.Clients[1].Peers.Count == 1;
+			},
 			pump: harness.Pump,
 			timeoutMs: 1000);
 

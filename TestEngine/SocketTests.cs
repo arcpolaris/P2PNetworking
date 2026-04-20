@@ -70,7 +70,6 @@ public sealed class SocketTests
     }
 
     [TestMethod]
-    [Priority(0)]
     [DataRow(676767, 33335, "67.182.146.214", 33335)]
     //[DataRow(676767, 33335, "174.277.49.79", 33338)]
     public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)

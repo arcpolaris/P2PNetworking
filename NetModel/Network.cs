@@ -225,7 +225,6 @@ public sealed class Network : IDisposable
 
 	public void Update()
 	{
-		Send(new Ping());
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
 	}

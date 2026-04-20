@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace NetModel;
@@ -10,6 +12,7 @@ internal class JitterBuffer
 	private const int capacity = 4;
 
 	// gotta keep ts sorted
+	private ConcurrentQueue<Packet> queue;
 	private List<Packet> buffer;
 
 	public Peer Remote { get; init; }
@@ -17,14 +20,13 @@ internal class JitterBuffer
 	public JitterBuffer(Peer peer)
 	{
 		buffer = new();
+		queue = new();
 		Remote = peer;
 	}
 
-	/// <summary>
-	/// Add a packet to the incoming buffer, then if unreliable packets exceed capacity, drop the oldest
-	/// </summary>
-	/// <param name="packet"></param>
-	public void Add(Packet packet)
+	public void Add(Packet packet) => queue.Enqueue(packet);
+
+	private void Tap(Packet packet)
 	{
 		int idx = buffer.BinarySearch(packet);
 		if (idx >= 0) throw new InvalidOperationException("Packet already exists in buffer");
@@ -35,11 +37,23 @@ internal class JitterBuffer
 		if (buffer.Where(p => !p.IsReliable).Count() <= capacity) return;
 
 		// at this point we *should* only be one over cap
-		buffer.RemoveAt(buffer.FindIndex(p => !p.IsReliable));
+		int drop = buffer.FindIndex(p => !p.IsReliable);
+		Debug.WriteLine(buffer[drop]);
+		buffer.RemoveAt(drop);
+	}
+
+	private void Drain()
+	{
+		while (queue.TryDequeue(out Packet packet))
+		{
+			Tap(packet);
+		}
 	}
 
 	public List<Packet> Consume()
 	{
+		Drain();
+
 		var res = buffer.TakeWhile(p => p.IsReliable).ToList();
 		buffer.RemoveRange(0, res.Count);
 		if (buffer.Count == 0) return res;

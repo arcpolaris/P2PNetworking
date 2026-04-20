@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Diagnostics;
+using System.Net;
 using FluentResults;
 using MessagePack;
 using NetModel;
@@ -50,7 +51,11 @@ internal sealed class LoopbackHarness : IDisposable
 		ConnectedNetworkPair pair = await ConnectAsync(host, client, punchTimeout);
 
 		await EventuallyAsync(
-			condition: () => client.MyId == pair.Host.Peers[0].Id,
+			condition: () =>
+			{
+				Debug.WriteLine($"{client.MyId} <> {pair.Host.Peers[0].Id}");
+				return client.MyId == pair.Host.Peers[0].Id;
+			},
 			pump: Pump,
 			timeoutMs: 4000);
 
@@ -88,7 +93,7 @@ internal sealed class LoopbackHarness : IDisposable
 						   .OrderBy(x => x)
 						   .SequenceEqual(host.Peers.Select(p => p.Id).OrderBy(x => x)),
 			pump: Pump,
-			timeoutMs: 4000);
+			timeoutMs: 1000);
 
 		return new MultiClientNetwork(host, clients);
 	}
