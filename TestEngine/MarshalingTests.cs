@@ -2,9 +2,10 @@
 
 namespace TestEngine;
 
+[TestClass]
 public sealed class MarshalingTests
 {
-	[Test]
+	[TestMethod]
 	public void MessageRegistry_MarshalDigest_RoundTripsMixedPacket()
 	{
 		MessageRegistry registry = new();
@@ -33,23 +34,27 @@ public sealed class MarshalingTests
 		byte[] bytes = registry.Marshal(outbound);
 		Packet inbound = registry.Digest(bytes);
 
-		Assert.That.AreEqual(42, inbound.Timestamp);
-		Assert.That.IsTrue(inbound.IsReliable);
-		Assert.That.AreEqual(4, inbound.Messages.Count);
+		Assert.AreEqual(42, inbound.Timestamp);
+		Assert.IsTrue(inbound.IsReliable);
+		Assert.AreEqual(4, inbound.Messages.Count);
 
-		Assert.That.AreEqual("alpha", ((TestMessage)inbound.Messages[0]).Text);
-		Assert.That.AreEqual(7, ((TestMessage)inbound.Messages[0]).Number);
+		Assert.IsInstanceOfType<TestMessage>(inbound.Messages[0]);
+		Assert.AreEqual("alpha", ((TestMessage)inbound.Messages[0]).Text);
+		Assert.AreEqual(7, ((TestMessage)inbound.Messages[0]).Number);
 
-		Assert.That.AreEqual("beta", ((OrderedMessage)inbound.Messages[1]).Label);
+		Assert.IsInstanceOfType<OrderedMessage>(inbound.Messages[1]);
+		Assert.AreEqual("beta", ((OrderedMessage)inbound.Messages[1]).Label);
 
-		Assert.That.AreEqual((ushort)9, ((SetId)inbound.Messages[2]).Id);
+		Assert.IsInstanceOfType<SetId>(inbound.Messages[2]);
+		Assert.AreEqual((ushort)9, ((SetId)inbound.Messages[2]).Id);
 
-		Assert.That.SequenceEqual(
+		Assert.IsInstanceOfType<AddPeers>(inbound.Messages[3]);
+		CollectionAssert.AreEqual(
 			new ushort[] { 1, 2 },
 			((AddPeers)inbound.Messages[3]).Peers.Select(p => p.Id).ToArray());
 	}
 
-	[Test]
+	[TestMethod]
 	public void PacketCompareTo_ReliableComesBeforeUnreliableAtSameTimestamp()
 	{
 		Packet reliable = new()
@@ -64,7 +69,7 @@ public sealed class MarshalingTests
 			IsReliable = false
 		};
 
-		Assert.That.IsTrue(reliable.CompareTo(unreliable) < 0);
-		Assert.That.IsTrue(unreliable.CompareTo(reliable) > 0);
+		Assert.IsTrue(reliable.CompareTo(unreliable) < 0);
+		Assert.IsTrue(unreliable.CompareTo(reliable) > 0);
 	}
 }

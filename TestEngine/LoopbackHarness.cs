@@ -28,7 +28,7 @@ internal sealed class LoopbackHarness : IDisposable
 		}
 
 		pump();
-		Assert.That.IsTrue(condition(), "Timed out waiting for condition.");
+		Assert.IsTrue(condition(), "Timed out waiting for condition.");
 	}
 
 	public async Task<ConnectedNetworkPair> CreateNetworkPairAsync(
@@ -121,10 +121,10 @@ internal sealed class LoopbackHarness : IDisposable
 
 		await Task.WhenAll(admitTask, joinTask);
 
-		Assert.That.IsTrue(admitTask.Result.IsSuccess,
-			string.Join(Environment.NewLine, admitTask.Result.Reasons.Select(e => e.Message)));
-		Assert.That.IsTrue(joinTask.Result.IsSuccess,
-			string.Join(Environment.NewLine, joinTask.Result.Reasons.Select(e => e.Message)));
+		Assert.IsTrue(admitTask.Result.IsSuccess,
+			string.Join(Environment.NewLine, admitTask.Result.Errors.Select(e => e.Message)));
+		Assert.IsTrue(joinTask.Result.IsSuccess,
+			string.Join(Environment.NewLine, joinTask.Result.Errors.Select(e => e.Message)));
 
 		return new ConnectedNetworkPair(
 			host,

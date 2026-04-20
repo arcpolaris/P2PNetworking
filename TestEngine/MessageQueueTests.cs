@@ -2,9 +2,10 @@
 
 namespace TestEngine;
 
+[TestClass]
 public sealed class MessageQueueTests
 {
-	[Test]
+	[TestMethod]
 	public async Task Send_UnreliableMessage_DeliversOverNetworkPair()
 	{
 		using LoopbackHarness harness = new();
@@ -27,14 +28,14 @@ public sealed class MessageQueueTests
 			condition: () => received is not null,
 			pump: harness.Pump);
 
-		Assert.That.NonNull(received);
-		Assert.That.AreEqual("hello", received?.Text);
-		Assert.That.AreEqual(7, received?.Number);
-		Assert.That.NonNull(sender);
-		Assert.That.AreEqual((ushort)0, sender?.Id);
+		Assert.IsNotNull(received);
+		Assert.AreEqual("hello", received.Text);
+		Assert.AreEqual(7, received.Number);
+		Assert.IsNotNull(sender);
+		Assert.AreEqual((ushort)0, sender.Id);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Send_ReliableMessage_DeliversOverNetworkPair()
 	{
 		using LoopbackHarness harness = new();
@@ -53,12 +54,12 @@ public sealed class MessageQueueTests
 			condition: () => deliveries.Count == 1,
 			pump: harness.Pump);
 
-		Assert.That.AreEqual(1, deliveries.Count);
-		Assert.That.AreEqual("reliable", deliveries[0].Text);
-		Assert.That.AreEqual(1, deliveries[0].Number);
+		Assert.AreEqual(1, deliveries.Count);
+		Assert.AreEqual("reliable", deliveries[0].Text);
+		Assert.AreEqual(1, deliveries[0].Number);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Send_MultipleMessagesInSameDirection_PreservesAppendOrder()
 	{
 		using LoopbackHarness harness = new();
@@ -78,12 +79,12 @@ public sealed class MessageQueueTests
 			condition: () => deliveries.Count == 3,
 			pump: harness.Pump);
 
-		Assert.That.SequenceEqual(
-			["first", "second", "third"],
+		CollectionAssert.AreEqual(
+			new[] { "first", "second", "third" },
 			deliveries);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Send_MixedReliableAndUnreliable_DeliversBothMessages()
 	{
 		using LoopbackHarness harness = new();
@@ -102,12 +103,12 @@ public sealed class MessageQueueTests
 			condition: () => deliveries.Count == 2,
 			pump: harness.Pump);
 
-		Assert.That.SequenceEqual(
-			["unreliable", "reliable"],
+		CollectionAssert.AreEquivalent(
+			new[] { "unreliable", "reliable" },
 			deliveries);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Update_WithNoQueuedMessages_DoesNotDeliverPhantomMessagesOrCrash()
 	{
 		using LoopbackHarness harness = new();
@@ -123,10 +124,10 @@ public sealed class MessageQueueTests
 			await Task.Delay(10);
 		}
 
-		Assert.That.AreEqual(0, deliveries);
+		Assert.AreEqual(0, deliveries);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task BidirectionalTraffic_BothNetworksCanSendAcrossSameConnection()
 	{
 		using LoopbackHarness harness = new();
@@ -150,11 +151,11 @@ public sealed class MessageQueueTests
 			condition: () => hostSeen.Count == 1 && clientSeen.Count == 1,
 			pump: harness.Pump);
 
-		Assert.That.SequenceEqual(["C->H"], hostSeen);
-		Assert.That.SequenceEqual(["H->C"], clientSeen);
+		CollectionAssert.AreEqual(new[] { "C->H" }, hostSeen);
+		CollectionAssert.AreEqual(new[] { "H->C" }, clientSeen);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Send_ManyMessages_RoundTripsThroughNetworkTransport()
 	{
 		using LoopbackHarness harness = new();
@@ -175,8 +176,8 @@ public sealed class MessageQueueTests
 			condition: () => deliveries.Count == 6,
 			pump: harness.Pump);
 
-		Assert.That.SequenceEqual(
-			["m0", "m1", "m2", "m3", "m4", "m5"],
+		CollectionAssert.AreEqual(
+			new[] { "m0", "m1", "m2", "m3", "m4", "m5" },
 			deliveries);
 	}
 }

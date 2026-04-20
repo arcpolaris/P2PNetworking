@@ -44,7 +44,7 @@ internal class JitterBuffer
 		buffer.RemoveRange(0, res.Count);
 		if (buffer.Count == 0) return res;
 
-		res.Append(buffer[0]);
+		res.Add(buffer[0]);
 		buffer.RemoveAt(0);
 
 		return res;

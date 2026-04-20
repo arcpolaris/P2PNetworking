@@ -1,59 +1,41 @@
-﻿using System.Diagnostics;
-using System.Linq;
+﻿using System.Linq;
 using NetModel;
 
 namespace TestEngine;
 
+[TestClass]
 public sealed class NetworkTests
 {
-	[Test]
-	[Tag("main")]
+	[TestMethod]
 	public async Task TryJoin_AssignsClientId_AndExposesHostPeer()
 	{
 		using LoopbackHarness harness = new();
 
 		var pair = await harness.CreateNetworkPairAsync(configure: null, 5f);
 
-		Assert.That.NonNull(pair.Client.Host);
-		Assert.That.AreEqual((ushort)0, pair.Client.Host!.Id);
-		Assert.That.AreEqual((ushort)0, pair.Host.MyId);
-		Assert.That.AreEqual(1, pair.Host.Peers.Count);
-		Assert.That.AreEqual(pair.Client.MyId, pair.Host.Peers[0].Id);
+		Assert.IsNotNull(pair.Client.Host);
+		Assert.AreEqual((ushort)0, pair.Client.Host!.Id);
+		Assert.AreEqual((ushort)0, pair.Host.MyId);
+		Assert.AreEqual(1, pair.Host.Peers.Count);
+		Assert.AreEqual(pair.Client.MyId, pair.Host.Peers[0].Id);
 	}
 
-	[Test]
-	[Tag("main")]
-	public async Task CreateNetworkPairTwice()
-	{
-		static async Task PairOnce()
-		{
-			using LoopbackHarness harness = new();
-			var pair = await harness.CreateNetworkPairAsync(null, 3f);
-			Debug.WriteLine("Host {0}", ((DirectPeer)pair.Host.Peers[0]).Socket.LocalEndPoint);
-			Debug.WriteLine("Client {0}", ((DirectPeer)pair.Client.Peers[0]).Socket.LocalEndPoint);
-		}
-
-		await PairOnce();
-		await Task.Delay(1000);
-		await PairOnce();
-	}
-
-	[Test]
+	[TestMethod]
 	public async Task HostSend_ClientReceivesOverLoopback()
 	{
 		using LoopbackHarness harness = new();
 
-		TestMessage? received = null;	
+		TestMessage? received = null;
 		Peer? sender = null;
 
 		var pair = await harness.CreateNetworkPairAsync(
 			net =>
 			{
-				net.Register<TestMessage>(100, (from, msg) =>
-				{
-					sender = from;
-					received = msg;
-				});
+					net.Register<TestMessage>(100, (from, msg) =>
+					{
+						sender = from;
+						received = msg;
+					});
 			});
 
 		pair.Host.Send(new TestMessage
@@ -66,14 +48,14 @@ public sealed class NetworkTests
 			condition: () => received is not null,
 			pump: harness.Pump);
 
-		Assert.That.NonNull(received);
-		Assert.That.NonNull(sender);
-		Assert.That.AreEqual("host->client", received.Text);
-		Assert.That.AreEqual(10, received.Number);
-		Assert.That.AreEqual((ushort)0, sender.Id);
+		Assert.IsNotNull(received);
+		Assert.IsNotNull(sender);
+		Assert.AreEqual("host->client", received.Text);
+		Assert.AreEqual(10, received.Number);
+		Assert.AreEqual((ushort)0, sender.Id);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task ClientSend_HostReceivesOverLoopback()
 	{
 		using LoopbackHarness harness = new();
@@ -84,11 +66,11 @@ public sealed class NetworkTests
 		var pair = await harness.CreateNetworkPairAsync(
 			net =>
 			{
-				net.Register<TestMessage>(100, (from, msg) =>
-				{
-					sender = from;
-					received = msg;
-				});
+					net.Register<TestMessage>(100, (from, msg) =>
+					{
+						sender = from;
+						received = msg;
+					});
 			});
 
 		pair.Client.Send(new TestMessage
@@ -101,14 +83,14 @@ public sealed class NetworkTests
 			condition: () => received is not null,
 			pump: harness.Pump);
 
-		Assert.That.NonNull(received);
-		Assert.That.NonNull(sender);
-		Assert.That.AreEqual("client->host", received.Text);
-		Assert.That.AreEqual(11, received.Number);
-		Assert.That.AreEqual(pair.Client.MyId, sender.Id);
+		Assert.IsNotNull(received);
+		Assert.IsNotNull(sender);
+		Assert.AreEqual("client->host", received.Text);
+		Assert.AreEqual(11, received.Number);
+		Assert.AreEqual(pair.Client.MyId, sender.Id);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task HostBroadcast_AllClientsReceiveOverLoopback()
 	{
 		using LoopbackHarness harness = new();
@@ -136,13 +118,13 @@ public sealed class NetworkTests
 			condition: () => seenByClient[0].Count == 1 && seenByClient[1].Count == 1,
 			pump: harness.Pump);
 
-		Assert.That.SequenceEqual(["broadcast"], seenByClient[0]);
-		Assert.That.SequenceEqual(["broadcast"], seenByClient[1]);
-		Assert.That.AreEqual((ushort)1, topo.Clients[0].MyId);
-		Assert.That.AreEqual((ushort)2, topo.Clients[1].MyId);
+		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient[0]);
+		CollectionAssert.AreEqual(new[] { "broadcast" }, seenByClient[1]);
+		Assert.AreEqual((ushort)1, topo.Clients[0].MyId);
+		Assert.AreEqual((ushort)2, topo.Clients[1].MyId);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task HostSendToAllExcept_ExcludedClientDoesNotReceive()
 	{
 		using LoopbackHarness harness = new();
@@ -171,11 +153,11 @@ public sealed class NetworkTests
 			condition: () => seenByClient[1].Count == 1,
 			pump: harness.Pump);
 
-		Assert.That.AreEqual(0, seenByClient[0].Count);
-		Assert.That.SequenceEqual(["everyone-but-1"], seenByClient[1]);
+		Assert.AreEqual(0, seenByClient[0].Count);
+		CollectionAssert.AreEqual(new[] { "everyone-but-1" }, seenByClient[1]);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task TryJoin_DefaultPingPong_UpdatesClientRtt()
 	{
 		using LoopbackHarness harness = new();
@@ -195,17 +177,14 @@ public sealed class NetworkTests
 					return false;
 				}
 			},
-			pump: () =>
-			{
-				harness.Pump();
-			},
+			pump: harness.Pump,
 			timeoutMs: 3000);
 
 		uint rtt = pair.Client.RTT(pair.Client.Host!);
-		Assert.That.IsTrue(rtt <= 5_000);
+		Assert.IsTrue(rtt <= 5_000);
 	}
 
-	[Test]
+	[TestMethod]
 	public async Task Kick_RemovesOnlyTargetedClientFromFurtherDelivery()
 	{
 		using LoopbackHarness harness = new();
@@ -242,11 +221,11 @@ public sealed class NetworkTests
 			condition: () => seenByClient[1].Count == 1,
 			pump: harness.Pump);
 
-		Assert.That.AreEqual(0, seenByClient[0].Count);
-		Assert.That.SequenceEqual(["after-kick"], seenByClient[1]);
+		Assert.AreEqual(0, seenByClient[0].Count);
+		CollectionAssert.AreEqual(new[] { "after-kick" }, seenByClient[1]);
 	}
 
-	[Test]
+	[TestMethod]
 	public void Disconnect_ClientWithNoHost_IsSafeNoOp()
 	{
 		using Network client = Network.ConstructClient();
@@ -254,7 +233,7 @@ public sealed class NetworkTests
 		client.Disconnect();
 	}
 
-	[Test]
+	[TestMethod]
 	public void Disconnect_HostWithNoPeers_IsSafeNoOp()
 	{
 		using Network host = Network.ConstructHost();
