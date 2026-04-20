@@ -5,10 +5,9 @@ using NetModel;
 
 namespace TestEngine;
 
-[TestClass]
 public sealed class SocketTests
 {
-    [TestMethod]
+    [Test]
     public async Task Loopback()
     {
         List<byte[]> garbageIn = [.. Enumerable.Range(0, 16).Select(i =>
@@ -31,8 +30,8 @@ public sealed class SocketTests
         sock1.SetRemote(new IPEndPoint(IPAddress.Loopback, 33334));
         sock2.SetRemote(new IPEndPoint(IPAddress.Loopback, 33333));
 
-        Assert.AreEqual(sock1.LocalEndPoint, sock2.RemoteEndPoint);
-        Assert.AreEqual(sock2.LocalEndPoint, sock1.RemoteEndPoint);
+        Assert.That.AreEqual(sock1.LocalEndPoint, sock2.RemoteEndPoint);
+        Assert.That.AreEqual(sock2.LocalEndPoint, sock1.RemoteEndPoint);
 
         using CancellationTokenSource cts = new();
 
@@ -50,14 +49,14 @@ public sealed class SocketTests
 
         await Task.WhenAll(poll, io);
 
-        Assert.AreEqual(garbageIn.Count, garbageOut.Count);
+        Assert.That.AreEqual(garbageIn.Count, garbageOut.Count);
         foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
         {
-            Assert.IsTrue(First.SequenceEqual(Second));
+            Assert.That.IsTrue(First.SequenceEqual(Second));
         }
     }
 
-    [TestMethod]
+    [Test]
     public async Task STUN()
     {
         var ip = await Helpers.GetPublicIP();
@@ -66,16 +65,15 @@ public sealed class SocketTests
         var ep = await sock.STUN();
 
         Debug.WriteLine(ep.ToString());
-        Assert.AreEqual(ip, ep.Address);
+        Assert.That.AreEqual(ip, ep.Address);
     }
 
-    [TestMethod]
-    [Priority(0)]
-    [DataRow(676767, 33335, "67.182.146.214", 33335)]
+    [Test(disabled: true)]
+    [TestCase(676767, 33335, "67.182.146.214", 33335)]
     //[DataRow(676767, 33335, "174.277.49.79", 33338)]
     public async Task P2PLoopback(int seed, int localPort, string remoteAddr, int remotePort)
     {
-        Assert.Inconclusive("Test was not enabled");
+        Assert.That.Inconclusive("Test was not enabled");
 
         var punch_probe = "punch"u8.ToArray();
 		Random rnd = new(seed);
@@ -138,10 +136,10 @@ public sealed class SocketTests
 		await Task.WhenAll(punch, poll, io);
 
 
-		Assert.AreEqual(garbageIn.Count, garbageOut.Count);
+		Assert.That.AreEqual(garbageIn.Count, garbageOut.Count);
 		foreach (var (First, Second) in garbageIn.OrderBy(buff => buff[0]).Zip(garbageOut.OrderBy(buff => buff[0])))
 		{
-			Assert.IsTrue(First.SequenceEqual(Second));
+			Assert.That.IsTrue(First.SequenceEqual(Second));
 		}
 	}
 }

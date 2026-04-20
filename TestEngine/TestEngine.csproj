@@ -1,12 +1,15 @@
-<Project Sdk="MSTest.Sdk/3.6.4">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UseVSTest>false</UseVSTest>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.6" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NetModel\NetModel.csproj" />

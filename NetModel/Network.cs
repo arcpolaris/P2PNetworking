@@ -8,6 +8,8 @@ using System.Threading;
 using System.Linq;
 using ObservableCollections;
 using System.Text;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace NetModel;
 
@@ -138,6 +140,7 @@ public sealed class Network : IDisposable
 		socket.SetRemote(remoteEP);
 
 		bool got_msg = false; // our hole is punched
+		bool got_ack = false;
 
 		//if either peer gets an ack, we're good
 		;
@@ -150,11 +153,14 @@ public sealed class Network : IDisposable
 
 		void TempMessageHandler(ArraySegment<byte> data)
 		{
-			if (msg.AsSpan().SequenceEqual(data)) got_msg = true;
-			else if (msg.AsSpan().SequenceEqual(ack))
+			Debug.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {Encoding.UTF8.GetString(data)} {(got_msg ? "X" : "")}");
+			if (data.AsSpan().SequenceEqual(msg)) got_msg = true;
+			else if (data.AsSpan().SequenceEqual(ack) && !got_ack)
 			{
+				got_msg = true;
+				got_ack = true;
 				//their hole is punched, so we don't need to keep punching
-				cts.CancelAfter(2000);
+				cts.CancelAfter(500);
 			}
 		}
 
@@ -164,10 +170,12 @@ public sealed class Network : IDisposable
 		_ = socket.StartPolling();
 		await socket.HolePunch(GetProbe, cts.Token);
 
+		Result<P2PSocket> result = new();
+
 		if (!got_msg)
 		{
 			socket.Dispose();
-			return Result.Fail<P2PSocket>("Local socket was not punched into");
+			return result.WithError("Local socket was not punched into");
 		}
 
 		socket.OnMessageRecieved -= TempMessageHandler;
