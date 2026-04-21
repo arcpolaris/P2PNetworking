@@ -1,107 +1,219 @@
 ﻿@startuml
 !define delegate (D, SteelBlue)
 
-
-+class Network <<static>>{
-	+List<Peer> Peers <<get; private set>>
-	+RpcBus RpcBus <<get; private set>>
-	-MessageQueue messageQueue
-
-	+Task<Result<Peer>> TryAdmit(float timeout)
-	+Task<Result<Peer>> TryJoin(float timeout)
++class Network <<sealed>> {
+	+Network? Instance <<static, get; private set>>
+	+Peer? Host <<get>>
+	+bool IsHost <<get; private init>>
+	+NetKey? MyId <<get; private set>>
+	+ISynchronizedViewList<Peer> Peers <<get; private init>>
+	+uint RTT(Peer peer)
+	+void FinishSetup()
+	+Task<Result<Peer>> TryAdmit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
+	+Task<Result<Peer>> TryJoin(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	+void Update()
-	+void Send<T>(in SendTarget target, T message)
+	+void Kick(Peer peer)
+	+void Disconnect()
+	+void Register<T>(NetKey key, Rpc<T> rpc)
+	+void Send<T>(in SendTarget target, T message, bool reliable)
+	+void Dispose()
 }
 
-Network::RpcBus *-- RpcBus
-Network::Peers o-- Peer
-Network::messageQueue *-- MessageQueue
-P2PSocket .. MessageRecievedEventArgs
+Network *-- MessageRegistry
+Network *-- MessageQueue
+Network o-- Peer
+Network ..> SendTarget
+Network ..> TargetKind
 
-~class MessageQueue{
-	-Dictionary<NetKey, NetBuffer> buffers
+~class MessageQueue {
+	-Dictionary<NetKey, PeerInfo> buffers
+	-MessageRegistry registry
 	+void ProcessFrame()
-	+void Subscribe(Peer peer)
+	+void Subscribe(DirectPeer peer)
+	+void Remove(DirectPeer peer)
 	+void SendFrame()
+	~void InvokeRemote<T>(Peer target, T message, bool reliable)
 }
+
 note left of MessageQueue::Subscribe
-Peer sends what it recieves into buffers
-asyncrhonously. Network::Update synchronously
-pulls from buffers
+DirectPeer sockets enqueue packets asynchronously.
+Network::Update drains MessageQueue synchronously
+through ProcessFrame and SendFrame.
 end note
 
-MessageQueue::buffers *-- NetBuffer
+MessageQueue::buffers *-- PeerInfo
+MessageQueue ..> MessageRegistry
 
--class NetBuffer{
-	+Channel<Action> Incoming <<get>>
-	+BinaryStream Outgoing <<get>>
+-class PeerInfo {
+	+JitterBuffer JitterBuffer <<get; init>>
+	+Packet Outbound <<get; set>>
+	+Packet OutboundReliable <<get; set>>
+	+DirectPeer Peer <<get; init>>
+	+int Timestamp <<get; set>>
+	+DateTime LastPing <<get; set>>
+	+void UpdateTimestamps()
 }
 
-+class P2PSocket implements IDisposable{
-	#int max_packet_size <<const>>
+PeerInfo *-- JitterBuffer
+PeerInfo *-- Packet
+PeerInfo *-- Packet : OutboundReliable
+PeerInfo --> DirectPeer
+
+~class MessageRegistry {
+	-Dictionary<NetKey, IRpcRegistration> rpcLookup
+	-Dictionary<Type, NetKey> typeLookup
+	+Type Lookup(NetKey key)
+	+NetKey Lookup(Type type)
+	+MessageRegistry Register<T>(NetKey key, Rpc<T> procedure)
+	~IRpcRegistration GetRpc(NetKey key)
+	~void Freeze()
+	~byte[] Marshal(Packet packet)
+	~Packet Digest(ArraySegment<byte> bytes)
+}
+
+MessageRegistry ..|> IMessageLookup
+MessageRegistry o-- IRpcRegistration
+MessageRegistry ..> MessageFormatter
+MessageRegistry ..> PacketFormatter
+
+~interface IMessageLookup {
+	+Type Lookup(NetKey key)
+	+NetKey Lookup(Type type)
+}
+
+~interface IRpcRegistration {
+	+Type Type <<get>>
+	+void Invoke(Peer sender, object message)
+}
+
+~class RpcRegistration<T> implements IRpcRegistration {
+	+Type Type <<get>>
+	+Rpc<T> Rpc <<get>>
+}
+
+RpcRegistration::Rpc - Rpc
+
++class Rpc<T> <<delegate>> {
+	Peer sender
+	T message
+}
+
+~class MessageFormatter implements IMessagePackFormatter<IMessage?> {
+	+void Serialize(ref MessagePackWriter writer, IMessage? value, MessagePackSerializerOptions options)
+	+IMessage Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)
+}
+
+~class PacketFormatter <<sealed>> implements IMessagePackFormatter<Packet?> {
+	+void Serialize(ref MessagePackWriter writer, Packet? value, MessagePackSerializerOptions options)
+	+Packet? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)
+}
+
+MessageFormatter ..> IMessageLookup
+PacketFormatter ..> IMessageLookup
+
+~class JitterBuffer {
+	-Peer Remote <<get; init>>
+	+void Add(Packet packet)
+	+List<Packet> Consume()
+}
+
+JitterBuffer o-- Packet
+JitterBuffer --> Peer
+
+~class Packet <<sealed>> {
+	+int Timestamp <<get; set>>
+	+bool IsReliable <<get; set>>
+	+List<IMessage> Messages <<get; set>>
+	+int CompareTo(Packet other)
+}
+
+Packet o-- IMessage
+
+~class P2PSocket implements IDisposable {
+	+int max_packet_size <<const>>
 	~Socket _socket
-	
 	+IPEndPoint LocalEndPoint <<get>>
 	+IPEndPoint RemoteEndPoint <<get>>
-
 	+void Bind(int port)
+	+void BindAny()
 	+void Dispose()
 	+void Send(ArraySegment<byte> data)
 	+Task SendAsync(ArraySegment<byte> data) <<async>>
 	+void SetRemote(IPEndPoint ep)
-	+Task HolePunch(CancellationToken ct) <<async>>
+	+Task HolePunch(byte[] probe, CancellationToken ct) <<async>>
+	+Task HolePunch(Func<byte[]> probe, CancellationToken ct) <<async>>
 	+Task StartPolling(CancellationToken ct) <<async>>
-
-	+{method} EventHandler<MessageRecievedEventArgs>? OnMessageRecieved <<event>>
+	+void EndPolling()
+	+Task<IPEndPoint> STUN() <<async>>
+	+{method} Action<ArraySegment<byte>>? OnMessageRecieved <<event>>
 }
 
-+class MessageRecievedEventArgs extends EventArgs{
-	+byte[] Data <<get>>
++class Peer {
+	+NetKey Id <<get; private init>>
 }
 
-+abstract class Peer{
-	+NetKey Id <<get; private set>>
-}
-
-+class DirectPeer extends Peer{
+~class DirectPeer extends Peer implements IDisposable{
 	~P2PSocket Socket <<get; private set>>
 	+IPEndPoint Address <<get>>
+	+void Dispose()
 }
-note right : Server-Client Connection only
+
 DirectPeer *-- P2PSocket
+note right of DirectPeer
+Server-client link wrapper.
+end note
 note right of Peer::Id
-Peer Ids are synced across
-all members of the network
+Peer IDs are synchronized
+across the network.
 end note
 
-~class RpcBus <<sealed>>{
-	-Dictionary<NetKey, IRpcRegistration> registry
-	+void Register<T>(NetKey key, Rpc<T> procedure)
-	~void InvokeRemote<T>(Peer target, T data)
-	~void InvokeLocal<T>(T data)
-	~Result<Action> Digest(BinaryReader reader)
-}
-note right of RpcBus::Digest
-Read key from stream
-Lookup type from key
-Call deserialize for type on stream
-end note
++interface IMessage
 
-RpcBus::registry o-- IRpcRegistration
-RpcRegistration::Rpc - Rpc
-
-~interface IRpcRegistration{
-	+Type Parameter <<get>>
-	+void Invoke(Peer sender, object data)
+~class Ping implements IMessage {
+	+DateTime Time <<get; init>>
 }
 
-~class RpcRegistration<T> implements IRpcRegistration{
-	+Rpc<T> Rpc <<get>>
+~class Pong implements IMessage {
+	+TimeSpan Delta <<get; init>>
 }
 
-+class Rpc<T> <<delegate>>{
-	Peer sender
-	T data
+~class AddPeers implements IMessage {
+	+List<Peer> Peers <<get; init>>
 }
 
+~class RemovePeers implements IMessage {
+	+List<Peer> Peers <<get; init>>
+}
+
+~class SetId implements IMessage {
+	+NetKey Id <<get; init>>
+}
+
+AddPeers o-- Peer
+RemovePeers o-- Peer
+
++class SendTarget <<record struct>> {
+	+TargetKind Kind <<get; init>>
+	+Peer? Peer <<get; init>>
+}
+
++enum TargetKind {
+	Host
+	Client
+	AllClients
+	AllClientsExcept
+}
+
++class Helpers <<static>> {
+	+Task<IPAddress> GetPublicIP() <<async, static>>
+	+void Deconstruct(IPEndPoint ep, out IPAddress address, out int port) <<static>>
+}
+
++class NetworkGuards <<static>> {
+	~void NotHost(Network network) <<static>>
+	~void NotClient(Network network) <<static>>
+	+T WrongType<T>(object input, string? message, Func<Exception>? exceptionCreator) <<static>>
+}
+
+NetworkGuards ..> Network
 @enduml
