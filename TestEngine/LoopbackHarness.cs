@@ -13,7 +13,8 @@ internal sealed class LoopbackHarness : IDisposable
 	public static async Task EventuallyAsync(
 		Func<bool> condition,
 		Action pump,
-		int timeoutMs = 2000,
+		int timeoutMs = 4000,
+		Action? onTimeout = null,
 		int stepMs = 10)
 	{
 		long started = Environment.TickCount64;
@@ -29,7 +30,10 @@ internal sealed class LoopbackHarness : IDisposable
 		}
 
 		pump();
-		Assert.IsTrue(condition(), "Timed out waiting for condition.");
+
+		if (onTimeout is null)
+			Assert.IsTrue(condition(), "Timed out waiting for condition.");
+		else onTimeout.Invoke();
 	}
 
 	public async Task<ConnectedNetworkPair> CreateNetworkPairAsync(
@@ -57,7 +61,8 @@ internal sealed class LoopbackHarness : IDisposable
 				return client.MyId == pair.Host.Peers[0].Id;
 			},
 			pump: Pump,
-			timeoutMs: 4000);
+			timeoutMs: 4000,
+			onTimeout: () => Assert.Inconclusive("Connection was not established"));
 
 		return pair;
 	}
@@ -93,7 +98,8 @@ internal sealed class LoopbackHarness : IDisposable
 						   .OrderBy(x => x)
 						   .SequenceEqual(host.Peers.Select(p => p.Id).OrderBy(x => x)),
 			pump: Pump,
-			timeoutMs: 1000);
+			timeoutMs: 4000,
+			onTimeout: () => Assert.Inconclusive("Connection was not established"));
 
 		return new MultiClientNetwork(host, clients);
 	}

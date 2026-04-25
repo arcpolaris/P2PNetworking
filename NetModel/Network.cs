@@ -8,7 +8,6 @@ using System.Threading;
 using System.Linq;
 using ObservableCollections;
 using System.Text;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace NetModel;
@@ -145,8 +144,9 @@ public sealed class Network : IDisposable
 
 		//if either peer gets an ack, we're good
 		;
-		byte[] msg = "MESSAGE_"u8.ToArray();
-		byte[] ack = "ACKNKOLG"u8.ToArray();
+		//FIXME: we should really use some other than skipping deserialization with a nil (like an actual message)
+		byte[] msg = [0xC0,.."MESSAGE"u8];
+		byte[] ack = [0xC0,.."ACKNLGE"u8];
 
 		byte[] GetProbe() => got_msg ? ack : msg;
 

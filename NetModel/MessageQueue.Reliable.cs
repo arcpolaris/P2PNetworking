@@ -26,9 +26,9 @@ internal partial class MessageQueue
 
 		private void AdvanceTimestamp(int newTime)
 		{
-			if (newTime <= timestamp)
+			if (newTime < timestamp)
 			{
-				throw new ArgumentOutOfRangeException(nameof(newTime), "Timestamp must be monotonically increasing");
+				throw new ArgumentOutOfRangeException(nameof(newTime), "Timestamp must not decrease");
 			}
 
 			int delta = newTime - timestamp;
@@ -84,7 +84,6 @@ internal partial class MessageQueue
 			int idx = Unacknowledged.BinarySearch(packet);
 			if (idx >= 0) throw new InvalidOperationException("Packet already exists in buffer");
 			Unacknowledged.Insert(~idx, packet);
-			Unacknowledged.Add(packet);
 		}
 
 		public bool GenAck(int timestamp, [NotNullWhen(true)] out Acknowledgement? ack)

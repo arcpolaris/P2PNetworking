@@ -47,6 +47,7 @@ internal partial class MessageQueue
 	private void SocketCallback(Peer peer, ArraySegment<byte> data)
 	{
 		Packet packet = registry.Digest(data);
+		if (packet is null) return;
 		buffers[peer.Id].JitterBuffer.Add(packet);
 	}
 
