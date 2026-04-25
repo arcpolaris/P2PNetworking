@@ -9,7 +9,7 @@ namespace NetModel;
 // btw we won't be fragmenting
 internal class JitterBuffer
 {
-	private const int capacity = 4;
+	private const int capacity = 8;
 
 	// gotta keep ts sorted
 	private ConcurrentQueue<Packet> queue;
@@ -34,10 +34,10 @@ internal class JitterBuffer
 
 		if (packet.IsReliable) return;
 
-		if (buffer.Where(p => !p.IsReliable).Count() <= capacity) return;
+		if (buffer.Where(static p => !p.IsReliable).Count() <= capacity) return;
 
 		// at this point we *should* only be one over cap
-		int drop = buffer.FindIndex(p => !p.IsReliable);
+		int drop = buffer.FindIndex(static p => !p.IsReliable);
 		Debug.WriteLine(buffer[drop]);
 		buffer.RemoveAt(drop);
 	}
