@@ -56,7 +56,9 @@ internal sealed class PacketFormatter(IMessageLookup lookup) : IMessagePackForma
 		{
 			NetKey key = reader.ReadUInt16();
 			Type type = Lookup.Lookup(key);
-			packet.Messages.Add((IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!);
+			IMessage message = (IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!;
+			if (message is Acknowledgement ack) ack.Timestamp = packet.Timestamp;
+			packet.Messages.Add(message);
 		}
 
 		return packet;

@@ -70,6 +70,7 @@ public sealed class Network : IDisposable
 		})
 		.Register<RemovePeers>(3, (sender, removePeers) =>
 		{
+			//FIXME
 			Guard.Against.NotClient(this);
 
 			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseSocket(c_host!);
@@ -85,7 +86,7 @@ public sealed class Network : IDisposable
 			Guard.Against.NotClient(this);
 
 			MyId = setId.Id;
-		});
+		}).Register<Acknowledgement>(5, MessageQueue.ConsumeAck);
 	}
 
 	private static void ThrowIfAlreadyInitialized()

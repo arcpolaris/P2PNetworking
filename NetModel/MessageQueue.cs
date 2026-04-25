@@ -4,44 +4,8 @@ using Ardalis.GuardClauses;
 
 namespace NetModel;
 
-internal class MessageQueue
+internal partial class MessageQueue
 {
-	private class PeerInfo
-	{
-		public PeerInfo(DirectPeer peer)
-		{
-			JitterBuffer = new(peer);
-			Outbound = new()
-			{
-				IsReliable = false,
-			};
-			OutboundReliable = new()
-			{
-				IsReliable = true,
-			};
-
-			Peer = peer;
-			LastPing = DateTime.UnixEpoch;
-		}
-
-		public void UpdateTimestamps()
-		{
-			Outbound.Timestamp = Timestamp;
-			OutboundReliable.Timestamp = Timestamp;
-			Timestamp++;
-		}
-
-		public JitterBuffer JitterBuffer { get; init; }
-		public Packet Outbound { get; set; }
-		public Packet OutboundReliable { get; set; }
-
-		public DirectPeer Peer { get; init; }
-
-		// outbound btw
-		public int Timestamp { get; set; }
-		public DateTime LastPing { get; set; }
-	}
-
 	private Dictionary<NetKey, PeerInfo> buffers = [];
 	private MessageRegistry registry;
 
@@ -57,11 +21,10 @@ internal class MessageQueue
 			var packets = info.JitterBuffer.Consume();
 			foreach (Packet packet in packets)
 			{
-				// TODO: Implement reliable packets, for now just do testing without them
-				//if (packet.IsReliable)
-				//{
-				//	throw new NotImplementedException();
-				//}
+				if (packet.IsReliable)
+				{
+					info.AckTracker.Acknowledge(packet);
+				}
 				foreach (IMessage message in packet.Messages)
 				{
 					InvokeLocal(info.Peer, message);
@@ -99,6 +62,21 @@ internal class MessageQueue
 				info.LastPing = DateTime.UtcNow;
 			}
 
+			if (info.OutboundReliable.Messages.Count > 0)
+			{
+				byte[] outboundReliable = registry.Marshal(info.OutboundReliable);
+				info.Peer.Socket.Send(outboundReliable);
+
+				info.AckTracker.AddPending(info.OutboundReliable);
+
+				info.OutboundReliable = new Packet { IsReliable = true };
+			}
+
+			if (info.AckTracker.GenAck(info.Timestamp, out var ack))
+			{
+				InvokeRemote(info.Peer, ack);
+			}
+
 			if (info.Outbound.Messages.Count > 0)
 			{
 				byte[] outbound = registry.Marshal(info.Outbound);
@@ -107,12 +85,13 @@ internal class MessageQueue
 				info.Outbound = new Packet() { IsReliable = false };
 			}
 
-			if (info.OutboundReliable.Messages.Count > 0)
+			foreach (var packet in info.AckTracker.FlushResends(info.Timestamp))
 			{
-				byte[] outboundReliable = registry.Marshal(info.OutboundReliable);
-				info.Peer.Socket.Send(outboundReliable);
+				info.Timestamp++;
 
-				info.OutboundReliable = new Packet { IsReliable = true };
+				byte[] digest = registry.Marshal(packet);
+				info.Peer.Socket.Send(digest);
+				info.AckTracker.AddPending(packet);
 			}
 		}
 	}

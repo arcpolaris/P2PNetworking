@@ -66,3 +66,25 @@ internal partial class SetId : IMessage
 	[SerializationConstructor]
 	public SetId(NetKey id) => Id = id;
 }
+
+[MessagePackObject(AllowPrivate = true)]
+internal partial class Acknowledgement : IMessage
+{
+	[IgnoreMember]
+	public int Timestamp { get; set; }
+
+	[Key(0)]
+	public uint BitField { get; init; }
+
+	[SerializationConstructor]
+	public Acknowledgement(uint bitField)
+	{
+		BitField = bitField;
+	}
+
+	public void Deconstruct(out int timestamp, out uint bitfield)
+	{
+		timestamp = Timestamp;
+		bitfield = BitField;
+	}
+}
