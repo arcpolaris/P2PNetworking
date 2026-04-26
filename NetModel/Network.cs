@@ -313,5 +313,7 @@ public sealed class Network : IDisposable
 	{
 		m_Peers.OfType<DirectPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
 		m_Peers.Clear();
+
+		Instance = null;
 	}
 }
