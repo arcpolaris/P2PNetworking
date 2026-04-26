@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using Ardalis.GuardClauses;
 
 namespace NetModel;
@@ -49,6 +51,14 @@ internal partial class MessageQueue
 		Packet packet = registry.Digest(data);
 		if (packet is null) return;
 		buffers[peer.Id].JitterBuffer.Add(packet);
+
+#if DEBUG
+		Trace.WriteLine($"Packet {packet.Timestamp} From {peer.Id} | {(packet.IsReliable ? "Reliable" : "Unreliable")}");
+		Trace.Indent();
+		foreach (var msg in packet.Messages.Select(m => m.GetType().ToString()))
+			Trace.WriteLine(msg);
+		Trace.Unindent();
+#endif
 	}
 
 	public void SendFrame()
