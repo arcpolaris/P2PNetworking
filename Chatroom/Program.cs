@@ -29,8 +29,13 @@ internal static class Program
 	{
 		Network.Instance!.Register<TextMessage>(100, (sender, text) =>
 		{
-			// TODO: send from client to client
 			Console.WriteLine("[{0}]: {1}", sender.Id, text.Text);
+
+			if (Network.Instance.IsHost) Network.Instance.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
+		});
+		Network.Instance.Register<IndirectTextMessage>(101, (sender, indicrect) =>
+		{
+			Console.WriteLine("[{0}]: {1}", indicrect.From, indicrect.Text);
 		});
 		Network.Instance.FinishSetup();
 
@@ -204,4 +209,27 @@ internal class TextMessage : IMessage
 	public string Text { get; set; }
 
 	public TextMessage(string text) => Text = text;
+}
+
+[MessagePackObject(AllowPrivate = true)]
+internal class IndirectTextMessage : IMessage
+{
+	[Key(0)]
+	public uint From { get; set; }
+
+	[Key(1)]
+	public string Text { get; set; }
+
+	[SerializationConstructor]
+	public IndirectTextMessage(uint from, string text)
+	{
+		From = from;
+		Text = text;
+	}
+
+	public IndirectTextMessage(Peer from, TextMessage text)
+	{
+		From = from.Id;
+		Text = text.Text;
+	}
 }
