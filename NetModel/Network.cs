@@ -1,14 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentResults;
-using Ardalis.GuardClauses;
-using System.Net;
-using System.Threading;
-using System.Linq;
 using ObservableCollections;
-using System.Text;
-using System.Diagnostics;
 
 namespace NetModel;
 
@@ -16,15 +16,34 @@ public sealed class Network : IDisposable
 {
 	public static Network? Instance { get; private set; }
 
-	private ObservableList<Peer> m_Peers { get; init; }
+	private readonly ObservableList<Peer> peers;
 	private MessageRegistry MessageRegistry { get; init; }
 	private MessageQueue MessageQueue { get; init; }
 
-	private Dictionary<NetKey, uint> pingRTT = new();
+	private Dictionary<NetKey, int> pingLookup = new();
 
-	public uint RTT(Peer peer) => pingRTT[peer.Id];
+	/// <summary>
+	/// Gets the round-trip time to a specific peer
+	/// </summary>
+	/// <param name="peer"></param>
+	/// <returns>RTT in milliseconds, or -1 if a pong has not been received yet</returns>
+	public int GetPing(Peer peer)
+	{
+		ThrowIfNotHost();
+		return pingLookup.TryGetValue(peer.Id, out int rtt) ? rtt : -1;
+	}
 
-	private NetKey h_peer_counter = 0;
+	/// <summary>
+	/// Gets the round-trip time to the host
+	/// </summary>
+	/// <returns>RTT in milliseconds, or -1 if a pong has not been received yet</returns>
+	public int GetPing()
+	{
+		ThrowIfNotClient();
+		return pingLookup.TryGetValue(0, out int rtt) ? rtt : -1;
+	}
+
+	private NetKey h_peerSequence = 0;
 
 	private DirectPeer? c_host = null;
 
@@ -32,12 +51,13 @@ public sealed class Network : IDisposable
 	{
 		get
 		{
-			Guard.Against.NotClient(this);
+			ThrowIfNotClient();
 			return c_host;
 		}
 	}
 
 	public bool IsHost { get; private init; }
+	public bool IsClient => !IsHost;
 
 	// host will always have Id 0
 	public NetKey? MyId { get; private set; }
@@ -46,8 +66,8 @@ public sealed class Network : IDisposable
 
 	private Network()
 	{
-		m_Peers = new ObservableList<Peer>();
-		Peers = m_Peers.CreateView(static p => p).ToViewList();		
+		peers = new ObservableList<Peer>();
+		Peers = peers.CreateView(static p => p).ToViewList();		
 
 		MessageRegistry = new();
 		MessageQueue = new(MessageRegistry);
@@ -60,29 +80,29 @@ public sealed class Network : IDisposable
 		})
 		.Register<Pong>(1, (sender, pong) =>
 		{
-			pingRTT[sender.Id] = (uint)pong.Delta.TotalMilliseconds;
+			pingLookup[sender.Id] = (int)pong.Delta.TotalMilliseconds;
 		})
 		.Register<AddPeers>(2, (sender, addPeers) =>
 		{
-			Guard.Against.NotClient(this);
-			m_Peers.AddRange(addPeers.Peers);
+			ThrowIfNotClient();
+			peers.AddRange(addPeers.Peers);
 		})
 		.Register<RemovePeers>(3, (sender, removePeers) =>
 		{
 			//FIXME
-			Guard.Against.NotClient(this);
+			ThrowIfNotClient();
 
 			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseSocket(c_host!);
 			else
 			{
 				foreach (Peer peer in removePeers.Peers)
 				{
-					m_Peers.Remove(peer);
+					peers.Remove(peer);
 				}
 			}
 		}).Register<SetId>(4, (sender, setId) =>
 		{
-			Guard.Against.NotClient(this);
+			ThrowIfNotClient();
 
 			MyId = setId.Id;
 		}).Register<Acknowledgement>(5, MessageQueue.ConsumeAck);
@@ -119,7 +139,7 @@ public sealed class Network : IDisposable
 		Instance = ConstructHost();
 	}
 
-	public static void InitalizeClient()
+	public static void InitializeClient()
 	{
 		ThrowIfAlreadyInitialized();
 		Instance = ConstructClient();
@@ -130,9 +150,9 @@ public sealed class Network : IDisposable
 		MessageRegistry.Freeze();
 	}
 
-	private static async Task<Result<P2PSocket>> TryUplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
+	private static async Task<Result<UdpPeerSocket>> TryUplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
-		P2PSocket socket = new();
+		UdpPeerSocket socket = new();
 		socket.BindAny();
 		IPEndPoint stun = await socket.STUN();
 		local(stun);
@@ -165,13 +185,13 @@ public sealed class Network : IDisposable
 			}
 		}
 
-		socket.OnMessageRecieved += TempMessageHandler;
+		socket.OnFrameReceived += TempMessageHandler;
 		cts.CancelAfter((int)(1000 * punchTimeout));
 
 		_ = socket.StartPolling();
 		await socket.HolePunch(GetProbe, cts.Token);
 
-		Result<P2PSocket> result = new();
+		Result<UdpPeerSocket> result = new();
 
 		if (!got_msg)
 		{
@@ -179,26 +199,26 @@ public sealed class Network : IDisposable
 			return result.WithError("Local socket was not punched into");
 		}
 
-		socket.OnMessageRecieved -= TempMessageHandler;
+		socket.OnFrameReceived -= TempMessageHandler;
 		return socket;
 	}
 
 	// VERY NOT THREAD SAFE
 	public async Task<Result<Peer>> TryAdmit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
-		Guard.Against.NotHost(this);
+		ThrowIfNotHost();
 
-		Result<P2PSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+		Result<UdpPeerSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
 
 		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
 
-		P2PSocket socket = uplinkResult.Value;
-		DirectPeer peer = new(++h_peer_counter, socket, socket.RemoteEndPoint);
-		m_Peers.Add(peer);
+		UdpPeerSocket socket = uplinkResult.Value;
+		DirectPeer peer = new(++h_peerSequence, socket, socket.RemoteEndPoint);
+		peers.Add(peer);
 		MessageQueue.Subscribe(peer);
 
 		SendTo<SetId>(peer, new(peer.Id), reliable: true);
-		SendTo<AddPeers>(peer, new(m_Peers.Except([peer])), reliable: true);
+		SendTo<AddPeers>(peer, new(peers.Except([peer])), reliable: true);
 		SendToAllExcept<AddPeers>(peer, new([peer]), reliable: true);
 
 		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
@@ -207,15 +227,15 @@ public sealed class Network : IDisposable
 
 	public async Task<Result<Peer>> TryJoin(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
-		Guard.Against.NotClient(this);
+		ThrowIfNotClient();
 
-		Result<P2PSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+		Result<UdpPeerSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
 
 		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
 
-		P2PSocket socket = uplinkResult.Value;
+		UdpPeerSocket socket = uplinkResult.Value;
 		DirectPeer peer = new(0, socket, socket.RemoteEndPoint);
-		m_Peers.Add(peer);
+		peers.Add(peer);
 		c_host = peer;
 		MessageQueue.Subscribe(c_host);
 
@@ -232,7 +252,7 @@ public sealed class Network : IDisposable
 
 	public void Kick(Peer peer)
 	{
-		Guard.Against.NotHost(this);
+		ThrowIfNotHost();
 		//WARNING: we don't tell someone when they have been kicked
 		SendToAllExcept(peer, new RemovePeers(peer), true);
 		CloseSocket((DirectPeer)peer);
@@ -241,7 +261,7 @@ public sealed class Network : IDisposable
 	private void CloseSocket(DirectPeer peer)
 	{
 		MessageQueue.Remove(peer);
-		m_Peers.Remove(peer);
+		peers.Remove(peer);
 		peer.Dispose();
 	}
 
@@ -249,7 +269,7 @@ public sealed class Network : IDisposable
 	{
 		if (IsHost)
 		{
-			foreach (Peer peer in m_Peers.ToList())
+			foreach (Peer peer in peers.ToList())
 			{
 				CloseSocket((DirectPeer)peer);
 			}
@@ -284,23 +304,23 @@ public sealed class Network : IDisposable
 		switch (target.Kind)
 		{
 			case TargetKind.Host:
-				Guard.Against.NotClient(this);
+				ThrowIfNotClient();
 				MessageQueue.InvokeRemote(c_host!, message, reliable);
 				break;
 			case TargetKind.Client:
-				Guard.Against.NotHost(this);
+				ThrowIfNotHost();
 				MessageQueue.InvokeRemote(target.Peer!, message, reliable);
 				break;
 			case TargetKind.AllClients:
-				Guard.Against.NotHost(this);
-				foreach (Peer peer in m_Peers)
+				ThrowIfNotHost();
+				foreach (Peer peer in peers)
 				{
 					MessageQueue.InvokeRemote(peer, message, reliable);
 				}
 				break;
 			case TargetKind.AllClientsExcept:
-				Guard.Against.NotHost(this);
-				foreach (Peer peer in m_Peers)
+				ThrowIfNotHost();
+				foreach (Peer peer in peers)
 				{
 					if (peer == target.Peer) continue;
 					MessageQueue.InvokeRemote(peer, message, reliable);
@@ -311,9 +331,31 @@ public sealed class Network : IDisposable
 
 	public void Dispose()
 	{
-		m_Peers.OfType<DirectPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
-		m_Peers.Clear();
+		peers.OfType<DirectPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
+		peers.Clear();
 
 		Instance = null;
+	}
+
+	public static async Task<IPAddress> GetPublicIP()
+	{
+		using HttpClient client = new();
+		string ip = await client.GetStringAsync("https://api.ipify.org");
+
+		return IPAddress.Parse(ip);
+	}
+
+	private void ThrowIfNotHost()
+	{
+		if (IsHost) return;
+
+		throw new InvalidOperationException("This method is only valid for a host");
+	}
+
+	private void ThrowIfNotClient()
+	{
+		if (IsClient) return;
+		
+		throw new InvalidOperationException("This method is only valid for a client");
 	}
 }

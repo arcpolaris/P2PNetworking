@@ -7,14 +7,14 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace NetModel;
-public class P2PSocket : IDisposable
+public class UdpPeerSocket : IDisposable
 {
 	public const int max_packet_size = 1024;
 	internal Socket _socket;
 
 	private CancellationTokenSource? pollingCTS;
 
-	public P2PSocket()
+	public UdpPeerSocket()
 	{
 		_socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
 		{
@@ -97,7 +97,7 @@ public class P2PSocket : IDisposable
 			} catch (OperationCanceledException) { break; }
 			if (read <= 0) break;
 			ArraySegment<byte> segment = new(buffer, 0, read);
-			OnMessageRecieved?.Invoke(segment);
+			OnFrameReceived?.Invoke(segment);
 		}
 	}
 
@@ -108,7 +108,7 @@ public class P2PSocket : IDisposable
 		pollingCTS = null;
 	}
 
-	public event Action<ArraySegment<byte>>? OnMessageRecieved;
+	public event Action<ArraySegment<byte>>? OnFrameReceived;
 
 	public async Task<IPEndPoint> STUN()
 	{

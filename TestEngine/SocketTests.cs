@@ -20,11 +20,11 @@ public sealed class SocketTests
         })];
         List<byte[]> garbageOut = [];
 
-        using P2PSocket sock1 = new();
-        using P2PSocket sock2 = new();
+        using UdpPeerSocket sock1 = new();
+        using UdpPeerSocket sock2 = new();
 
-		sock2.OnMessageRecieved += data => sock2.Send(data.ToArray());
-		sock1.OnMessageRecieved += data => garbageOut.Add([.. data]);
+		sock2.OnFrameReceived += data => sock2.Send(data.ToArray());
+		sock1.OnFrameReceived += data => garbageOut.Add([.. data]);
 
         sock1.Bind(33333);
         sock2.Bind(33334);
@@ -60,8 +60,8 @@ public sealed class SocketTests
     [TestMethod]
     public async Task STUN()
     {
-        var ip = await Helpers.GetPublicIP();
-        using P2PSocket sock = new();
+        var ip = await Network.GetPublicIP();
+        using UdpPeerSocket sock = new();
         sock.Bind(33338);
         var ep = await sock.STUN();
 
@@ -87,7 +87,7 @@ public sealed class SocketTests
 		})];
 		List<byte[]> garbageOut = [];
 
-        using P2PSocket sock = new();
+        using UdpPeerSocket sock = new();
 
         sock.Bind(localPort);
         Debug.WriteLine($"Local port: {localPort}");
@@ -95,7 +95,7 @@ public sealed class SocketTests
         IPEndPoint publicEP = await sock.STUN();
         Debug.WriteLine(publicEP);
 
-        sock.OnMessageRecieved += data =>
+        sock.OnFrameReceived += data =>
         {
 
 			if (data.AsSpan().SequenceEqual(punch_probe))

@@ -173,23 +173,9 @@ public sealed class NetworkTests
 		var pair = await harness.CreateNetworkPairAsync(configure: null);
 
 		await LoopbackHarness.EventuallyAsync(
-			condition: () =>
-			{
-				try
-				{
-					_ = pair.Client.RTT(pair.Client.Host!);
-					return true;
-				}
-				catch (KeyNotFoundException)
-				{
-					return false;
-				}
-			},
+			condition: () => pair.Client.GetPing() is > -1 and <= 5_000,
 			pump: harness.Pump,
 			timeoutMs: 3000);
-
-		uint rtt = pair.Client.RTT(pair.Client.Host!);
-		Assert.IsTrue(rtt <= 5_000);
 	}
 
 	[TestMethod]

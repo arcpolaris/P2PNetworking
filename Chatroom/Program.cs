@@ -10,8 +10,6 @@ using FluentResults;
 using MessagePack;
 using NetModel;
 
-using static NetModel.Helpers;
-
 namespace Chatroom;
 
 internal static class Program
@@ -62,7 +60,7 @@ internal static class Program
 		Command getip_cmd = new("myip", "Displays the working IP address (IPv4)")
 		{
 		};
-		getip_cmd.SetAction(async _ => { var ip = await GetPublicIP(); Console.WriteLine(ip); return 0; });
+		getip_cmd.SetAction(async _ => { var ip = await Network.GetPublicIP(); Console.WriteLine(ip); return 0; });
 		root_cmd.Add(getip_cmd);
 
 		Option<double> timeout_opt = new("timeout", "-t", "--timeout")
@@ -90,7 +88,7 @@ internal static class Program
 			start_cmd.Add(start_host_cmd);
 
 			Command start_cmdlient_cmd = new("client", "Start Network as client");
-			start_cmdlient_cmd.SetAction(_ => { Network.InitalizeClient(); Setup();});
+			start_cmdlient_cmd.SetAction(_ => { Network.InitializeClient(); Setup();});
 			start_cmd.Add(start_cmdlient_cmd);
 
 			Command admit_cmd = new("admit", "Admit a client to your chatroom")

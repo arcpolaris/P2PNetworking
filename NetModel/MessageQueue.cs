@@ -2,19 +2,13 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using Ardalis.GuardClauses;
 
 namespace NetModel;
 
-internal partial class MessageQueue
+internal partial class MessageQueue(MessageRegistry registry)
 {
 	private Dictionary<NetKey, PeerInfo> buffers = [];
-	private MessageRegistry registry;
-
-	public MessageQueue(MessageRegistry registry)
-	{
-		this.registry = registry;
-	}
+	private MessageRegistry registry = registry;
 
 	public void ProcessFrame()
 	{
@@ -38,7 +32,7 @@ internal partial class MessageQueue
 	public void Subscribe(DirectPeer peer)
 	{
 		buffers.Add(peer.Id, new(peer));
-		peer.Socket.OnMessageRecieved += data => SocketCallback(peer, data);
+		peer.Socket.OnFrameReceived += data => SocketCallback(peer, data);
 	}
 
 	public void Remove(DirectPeer peer)
@@ -109,7 +103,7 @@ internal partial class MessageQueue
 
 	internal void InvokeRemote<T>(Peer target, T message, bool reliable = false) where T : class, IMessage
 	{
-		Guard.Against.WrongType<DirectPeer>(target, message: "Cannot invoke on indirect remote peer");
+		if (target is not DirectPeer) throw new ArgumentException("Cannot invoke on indirect remote peer");
 		PeerInfo info = buffers[target.Id];
 		Packet outbound = reliable ? info.OutboundReliable : info.Outbound;
 		outbound.Messages.Add(message);

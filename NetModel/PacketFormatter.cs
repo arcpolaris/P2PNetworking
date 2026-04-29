@@ -7,6 +7,7 @@ using MessagePack.Formatters;
 namespace NetModel;
 
 [SuppressMessage("Usage", "MsgPack013:Inaccessible formatter", Justification = "Formatter will always be used as an instance")]
+[SuppressMessage("CodeQuality", "IDE0079:Remove unnecessary suppression")]
 internal sealed class PacketFormatter(IMessageLookup lookup) : IMessagePackFormatter<Packet?>
 {
 	private IMessageLookup Lookup { get; } = lookup;

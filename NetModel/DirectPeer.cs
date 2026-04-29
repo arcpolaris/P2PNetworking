@@ -3,10 +3,16 @@ using System.Net;
 
 namespace NetModel;
 
-internal class DirectPeer(NetKey id, P2PSocket socket, IPEndPoint address) : Peer(id), IDisposable
+/// <summary>
+/// A <see cref="Peer"/> that can be directly communicated with
+/// </summary>
+/// <param name="id"></param>
+/// <param name="socket"></param>
+/// <param name="endpoint"></param>
+internal class DirectPeer(NetKey id, UdpPeerSocket socket, IPEndPoint endpoint) : Peer(id), IDisposable
 {
-	internal P2PSocket Socket { get; private set; } = socket;
-	public IPEndPoint Address { get; } = address;
+	internal UdpPeerSocket Socket { get; private set; } = socket;
+	public IPEndPoint RemoteEP { get; } = endpoint;
 
 	public void Dispose() => Socket.Dispose();
 }

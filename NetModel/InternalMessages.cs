@@ -26,7 +26,7 @@ internal partial class Pong : IMessage
 	[SerializationConstructor]
 	private Pong(TimeSpan delta) => Delta = delta;
 
-	public Pong(Ping ping) => Delta = ping.Time - DateTime.UtcNow;
+	public Pong(Ping ping) => Delta = DateTime.UtcNow - ping.Time;
 }
 
 [MessagePackObject(AllowPrivate = true)]
@@ -54,8 +54,6 @@ internal partial class RemovePeers : IMessage
 	public RemovePeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
 	public RemovePeers(Peer peer) : this([peer]) { }
 }
-
-
 
 [MessagePackObject(AllowPrivate = true)]
 internal partial class SetId : IMessage

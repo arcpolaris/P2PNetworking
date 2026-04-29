@@ -19,9 +19,4 @@ internal sealed class Packet : IComparable<Packet>
 		// reliable packets go BEFORE unreliable ones
 		return -IsReliable.CompareTo(other.IsReliable);
 	}
-
-	//public override string ToString()
-	//{
-	//	Stringbuild
-	//}
 }

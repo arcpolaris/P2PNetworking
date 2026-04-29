@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using Ardalis.GuardClauses;
 
 namespace NetModel;
 
@@ -74,13 +73,13 @@ internal partial class MessageQueue
 		// Confirm that a packet was recieved
 		public void Acknowledge(Packet packet)
 		{
-			//FIXME: if we recieve a sent packet, after we send a reset packet, how do we know they are the same?
+			//FIXME: if we recieve a sent packet, after we send a resend packet, how do we know they are the same?
 			Unacknowledged.Remove(packet);
 		}
 
 		public void AddPending(Packet packet)
 		{
-			Guard.Against.InvalidInput(packet, nameof(packet), static p => p.IsReliable, "Packet must be reliable");
+			if (!packet.IsReliable) throw new ArgumentException("Pending packet must be reliable", nameof(packet));
 			int idx = Unacknowledged.BinarySearch(packet);
 			if (idx >= 0) throw new InvalidOperationException("Packet already exists in buffer");
 			Unacknowledged.Insert(~idx, packet);
