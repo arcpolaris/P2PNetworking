@@ -20,7 +20,7 @@ public sealed class MarshalingTests
 
 		Packet outbound = new()
 		{
-			Timestamp = 42,
+			Sequence = 42,
 			IsReliable = true,
 			Messages =
 			[
@@ -34,7 +34,7 @@ public sealed class MarshalingTests
 		byte[] bytes = registry.Marshal(outbound);
 		Packet inbound = registry.Digest(bytes);
 
-		Assert.AreEqual(42, inbound.Timestamp);
+		Assert.AreEqual(42, inbound.Sequence);
 		Assert.IsTrue(inbound.IsReliable);
 		Assert.AreEqual(4, inbound.Messages.Count);
 
@@ -55,17 +55,17 @@ public sealed class MarshalingTests
 	}
 
 	[TestMethod]
-	public void PacketCompareTo_ReliableComesBeforeUnreliableAtSameTimestamp()
+	public void PacketCompareTo_ReliableComesBeforeUnreliableAtSameSequence()
 	{
 		Packet reliable = new()
 		{
-			Timestamp = 5,
+			Sequence = 5,
 			IsReliable = true
 		};
 
 		Packet unreliable = new()
 		{
-			Timestamp = 5,
+			Sequence = 5,
 			IsReliable = false
 		};
 

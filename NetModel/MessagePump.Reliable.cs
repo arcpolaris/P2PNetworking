@@ -5,32 +5,32 @@ using System.Linq;
 
 namespace NetModel;
 
-internal partial class MessageQueue
+internal partial class MessagePump
 {
 	public void ConsumeAck(Peer sender, Acknowledgement ack)
 	{
-		buffers[sender.Id].AckTracker.ConsumeAck(ack);
+		infos[sender.Id].AckTracker.ConsumeAck(ack);
 	}
 
-	private class AckTracker(int timestamp) {
+	private class AckTracker(int sequence) {
 		private List<Packet> Unacknowledged { get; } = [];
 
 		// TODO: consolidate messages between packets
 		private List<Packet> ResendQueue { get; set; } = [];
 
-		// earliest relevant packet is timestamp-32
-		private int timestamp = timestamp;
-		// if the nth bit is set, the reliable packet with timestamp=timestamp-nth was recieved (1-indexed)
+		// earliest relevant packet is sequence-32
+		private int sequence = sequence;
+		// if the nth bit is set, the reliable packet with seq=seq-nth was recieved (1-indexed)
 		private uint acknowledged = 0;
 
-		private void AdvanceTimestamp(int newTime)
+		private void AdvanceSequence(int newSequence)
 		{
-			if (newTime < timestamp)
+			if (newSequence < sequence)
 			{
-				throw new ArgumentOutOfRangeException(nameof(newTime), "Timestamp must not decrease");
+				throw new ArgumentOutOfRangeException(nameof(newSequence), "Sequence must not decrease");
 			}
 
-			int delta = newTime - timestamp;
+			int delta = newSequence - sequence;
 
 			for (int i = 0; i < Math.Min(delta, 32); i++)
 			{
@@ -38,11 +38,11 @@ internal partial class MessageQueue
 				if (((acknowledged >> i) & 1) < 1)
 				{
 					// and we didn't get an ack for it
-					// so we should always have one corresponding packet (unless we skipped timestamps)
-					Packet? packet = Unacknowledged.SingleOrDefault(p => p.Timestamp == timestamp - i);
+					// so we should always have one corresponding packet (unless we skipped a seqid)
+					Packet? packet = Unacknowledged.SingleOrDefault(p => p.Sequence == sequence - i);
 					if (packet is null) continue;
 
-					packet.Timestamp = -1; // this will be updated when the packet is resent
+					packet.Sequence = -1; // this will be updated when the packet is resent
 					Unacknowledged.Remove(packet);
 					ResendQueue.Add(packet);
 				}
@@ -50,20 +50,20 @@ internal partial class MessageQueue
 
 			if (delta > 31) acknowledged = 0;
 			else acknowledged <<= delta;
-			timestamp = newTime;
+			sequence = newSequence;
 		}
 
-		public IEnumerable<Packet> FlushResends(int timestamp)
+		public IEnumerable<Packet> FlushResends(int sequence)
 		{
-			AdvanceTimestamp(timestamp);
+			AdvanceSequence(sequence);
 			(var result, ResendQueue) = (ResendQueue, new());
-			return result.Select((p, i) => { p.Timestamp = timestamp + i + 1; return p; });
+			return result.Select((p, i) => { p.Sequence = sequence + i + 1; return p; });
 		}
 
 		// Get confirmation that a packet was recieved
 		public void ConsumeAck(Acknowledgement ack)
 		{
-			int delta = timestamp - ack.Timestamp;
+			int delta = sequence - ack.Sequence;
 			if (delta < 0) throw new InvalidOperationException("Ack is from the future?");
 			if (delta >= 32) return;
 
@@ -85,9 +85,9 @@ internal partial class MessageQueue
 			Unacknowledged.Insert(~idx, packet);
 		}
 
-		public bool GenAck(int timestamp, [NotNullWhen(true)] out Acknowledgement? ack)
+		public bool GenAck(int sequence, [NotNullWhen(true)] out Acknowledgement? ack)
 		{
-			AdvanceTimestamp(timestamp);
+			AdvanceSequence(sequence);
 
 			if (acknowledged == 0)
 			{

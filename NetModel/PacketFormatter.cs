@@ -22,7 +22,7 @@ internal sealed class PacketFormatter(IMessageLookup lookup) : IMessagePackForma
 
 		writer.WriteArrayHeader(3);
 
-		writer.WriteInt32(value.Timestamp);
+		writer.WriteInt32(value.Sequence);
 		writer.Write(value.IsReliable);
 
 		writer.WriteArrayHeader(value.Messages.Count);
@@ -46,7 +46,7 @@ internal sealed class PacketFormatter(IMessageLookup lookup) : IMessagePackForma
 
 		Packet packet = new()
 		{
-			Timestamp = reader.ReadInt32(),
+			Sequence = reader.ReadInt32(),
 			IsReliable = reader.ReadBoolean()
 		};
 
@@ -58,7 +58,7 @@ internal sealed class PacketFormatter(IMessageLookup lookup) : IMessagePackForma
 			NetKey key = reader.ReadUInt16();
 			Type type = Lookup.Lookup(key);
 			IMessage message = (IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!;
-			if (message is Acknowledgement ack) ack.Timestamp = packet.Timestamp;
+			if (message is Acknowledgement ack) ack.Sequence = packet.Sequence;
 			packet.Messages.Add(message);
 		}
 

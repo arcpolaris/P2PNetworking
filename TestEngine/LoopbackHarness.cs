@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Net;
-using FluentResults;
 using MessagePack;
 using NetModel;
 
@@ -120,22 +119,17 @@ internal sealed class LoopbackHarness : IDisposable
 		TaskCompletionSource<IPEndPoint> clientEndpoint =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		Task<Result<Peer>> admitTask = host.TryAdmit(
+		Task<Peer> admitTask = host.Admit(
 			local: hostEndpoint.SetResult,
 			remote: clientEndpoint.Task,
 			punchTimeout: punchTimeout);
 
-		Task<Result<Peer>> joinTask = client.TryJoin(
+		Task<Peer> joinTask = client.Join(
 			local: clientEndpoint.SetResult,
 			remote: hostEndpoint.Task,
 			punchTimeout: punchTimeout);
 
 		await Task.WhenAll(admitTask, joinTask);
-
-		Assert.IsTrue(admitTask.Result.IsSuccess,
-			string.Join(Environment.NewLine, admitTask.Result.Errors.Select(e => e.Message)));
-		Assert.IsTrue(joinTask.Result.IsSuccess,
-			string.Join(Environment.NewLine, joinTask.Result.Errors.Select(e => e.Message)));
 
 		return new ConnectedNetworkPair(
 			host,

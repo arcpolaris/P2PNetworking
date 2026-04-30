@@ -5,7 +5,7 @@ namespace NetModel;
 
 internal sealed class Packet : IComparable<Packet>
 {
-	public int Timestamp { get; set; }
+	public int Sequence { get; set; }
 
 	public bool IsReliable { get; set; }
 
@@ -13,7 +13,7 @@ internal sealed class Packet : IComparable<Packet>
 
 	public int CompareTo(Packet other)
 	{
-		int raw = Timestamp.CompareTo(other.Timestamp);
+		int raw = Sequence.CompareTo(other.Sequence);
 		if (raw != 0) return raw;
 
 		// reliable packets go BEFORE unreliable ones

@@ -2,14 +2,14 @@
 
 namespace NetModel;
 
-internal partial class MessageQueue
+internal partial class MessagePump
 {
 	private class PeerInfo
 	{
-		public PeerInfo(DirectPeer peer)
+		public PeerInfo(SocketPeer peer)
 		{
 			JitterBuffer = new(peer);
-			AckTracker = new(Timestamp);
+			AckTracker = new(Sequence);
 			Outbound = new()
 			{
 				IsReliable = false,
@@ -23,11 +23,11 @@ internal partial class MessageQueue
 			LastPing = DateTime.UnixEpoch;
 		}
 
-		public void UpdateTimestamps()
+		public void AdvanceSequence()
 		{
-			Outbound.Timestamp = Timestamp;
-			OutboundReliable.Timestamp = Timestamp;
-			Timestamp++;
+			Outbound.Sequence = Sequence;
+			OutboundReliable.Sequence = Sequence;
+			Sequence++;
 		}
 
 		public JitterBuffer JitterBuffer { get; init; }
@@ -35,10 +35,10 @@ internal partial class MessageQueue
 		public Packet Outbound { get; set; }
 		public Packet OutboundReliable { get; set; }
 
-		public DirectPeer Peer { get; init; }
+		public SocketPeer Peer { get; init; }
 
 		// outbound btw
-		public int Timestamp { get; set; } = 0;
+		public int Sequence { get; set; } = 0;
 		public DateTime LastPing { get; set; }
 	}
 }

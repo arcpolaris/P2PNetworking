@@ -7,7 +7,6 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentResults;
 using ObservableCollections;
 
 namespace NetModel;
@@ -18,7 +17,7 @@ public sealed class Network : IDisposable
 
 	private readonly ObservableList<Peer> peers;
 	private MessageRegistry MessageRegistry { get; init; }
-	private MessageQueue MessageQueue { get; init; }
+	private MessagePump MessageQueue { get; init; }
 
 	private Dictionary<NetKey, int> pingLookup = new();
 
@@ -45,7 +44,7 @@ public sealed class Network : IDisposable
 
 	private NetKey h_peerSequence = 0;
 
-	private DirectPeer? c_host = null;
+	private SocketPeer? c_host = null;
 
 	public Peer? Host
 	{
@@ -150,7 +149,7 @@ public sealed class Network : IDisposable
 		MessageRegistry.Freeze();
 	}
 
-	private static async Task<Result<UdpPeerSocket>> TryUplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
+	private static async Task<UdpPeerSocket> Uplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
 		UdpPeerSocket socket = new();
 		socket.BindAny();
@@ -165,6 +164,7 @@ public sealed class Network : IDisposable
 		//if either peer gets an ack, we're good
 		;
 		//FIXME: we should really use some other than skipping deserialization with a nil (like an actual message)
+		//IDEA: use a message that keeps track of the highest ack sequence, and ramp down timeout as we get more seqs
 		byte[] msg = [0xC0,.."MESSAGE"u8];
 		byte[] ack = [0xC0,.."ACKNLGE"u8];
 
@@ -191,12 +191,10 @@ public sealed class Network : IDisposable
 		_ = socket.StartPolling();
 		await socket.HolePunch(GetProbe, cts.Token);
 
-		Result<UdpPeerSocket> result = new();
-
 		if (!got_msg)
 		{
 			socket.Dispose();
-			return result.WithError("Local socket was not punched into");
+			throw new TimeoutException("Hole punching killed for exceeding timeout");
 		}
 
 		socket.OnFrameReceived -= TempMessageHandler;
@@ -204,16 +202,13 @@ public sealed class Network : IDisposable
 	}
 
 	// VERY NOT THREAD SAFE
-	public async Task<Result<Peer>> TryAdmit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
+	public async Task<Peer> Admit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotHost();
 
-		Result<UdpPeerSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout);
 
-		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
-
-		UdpPeerSocket socket = uplinkResult.Value;
-		DirectPeer peer = new(++h_peerSequence, socket, socket.RemoteEndPoint);
+		SocketPeer peer = new(++h_peerSequence, socket, socket.RemoteEndPoint);
 		peers.Add(peer);
 		MessageQueue.Subscribe(peer);
 
@@ -221,27 +216,24 @@ public sealed class Network : IDisposable
 		SendTo<AddPeers>(peer, new(peers.Except([peer])), reliable: true);
 		SendToAllExcept<AddPeers>(peer, new([peer]), reliable: true);
 
-		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
+		return peer;
 	}
 
 
-	public async Task<Result<Peer>> TryJoin(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
+	public async Task<Peer> Join(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotClient();
 
-		Result<UdpPeerSocket> uplinkResult = await TryUplink(local, remote, punchTimeout);
+		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout);
 
-		if (uplinkResult.IsFailed) return Result.Fail(uplinkResult.Errors);
-
-		UdpPeerSocket socket = uplinkResult.Value;
-		DirectPeer peer = new(0, socket, socket.RemoteEndPoint);
+		SocketPeer peer = new(0, socket, socket.RemoteEndPoint);
 		peers.Add(peer);
 		c_host = peer;
 		MessageQueue.Subscribe(c_host);
 
 		Send<Ping>(new());
 
-		return Result.Ok<Peer>(peer).WithSuccesses(uplinkResult.Successes);
+		return peer;
 	}
 
 	public void Update()
@@ -255,10 +247,10 @@ public sealed class Network : IDisposable
 		ThrowIfNotHost();
 		//WARNING: we don't tell someone when they have been kicked
 		SendToAllExcept(peer, new RemovePeers(peer), true);
-		CloseSocket((DirectPeer)peer);
+		CloseSocket((SocketPeer)peer);
 	}
 
-	private void CloseSocket(DirectPeer peer)
+	private void CloseSocket(SocketPeer peer)
 	{
 		MessageQueue.Remove(peer);
 		peers.Remove(peer);
@@ -271,7 +263,7 @@ public sealed class Network : IDisposable
 		{
 			foreach (Peer peer in peers.ToList())
 			{
-				CloseSocket((DirectPeer)peer);
+				CloseSocket((SocketPeer)peer);
 			}
 			Send<RemovePeers>(new(new Peer(0)), true);
 		} else
@@ -305,17 +297,17 @@ public sealed class Network : IDisposable
 		{
 			case TargetKind.Host:
 				ThrowIfNotClient();
-				MessageQueue.InvokeRemote(c_host!, message, reliable);
+				MessageQueue.Trigger(c_host!, message, reliable);
 				break;
 			case TargetKind.Client:
 				ThrowIfNotHost();
-				MessageQueue.InvokeRemote(target.Peer!, message, reliable);
+				MessageQueue.Trigger(target.Peer!, message, reliable);
 				break;
 			case TargetKind.AllClients:
 				ThrowIfNotHost();
 				foreach (Peer peer in peers)
 				{
-					MessageQueue.InvokeRemote(peer, message, reliable);
+					MessageQueue.Trigger(peer, message, reliable);
 				}
 				break;
 			case TargetKind.AllClientsExcept:
@@ -323,7 +315,7 @@ public sealed class Network : IDisposable
 				foreach (Peer peer in peers)
 				{
 					if (peer == target.Peer) continue;
-					MessageQueue.InvokeRemote(peer, message, reliable);
+					MessageQueue.Trigger(peer, message, reliable);
 				}
 				break;
 		}
@@ -331,7 +323,7 @@ public sealed class Network : IDisposable
 
 	public void Dispose()
 	{
-		peers.OfType<DirectPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
+		peers.OfType<SocketPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
 		peers.Clear();
 
 		Instance = null;

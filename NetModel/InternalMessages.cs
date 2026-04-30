@@ -69,7 +69,7 @@ internal partial class SetId : IMessage
 internal partial class Acknowledgement : IMessage
 {
 	[IgnoreMember]
-	public int Timestamp { get; set; }
+	public int Sequence { get; set; }
 
 	[Key(0)]
 	public uint BitField { get; init; }
@@ -80,9 +80,9 @@ internal partial class Acknowledgement : IMessage
 		BitField = bitField;
 	}
 
-	public void Deconstruct(out int timestamp, out uint bitfield)
+	public void Deconstruct(out int sequence, out uint bitfield)
 	{
-		timestamp = Timestamp;
+		sequence = Sequence;
 		bitfield = BitField;
 	}
 }

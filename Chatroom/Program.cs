@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentResults;
 using MessagePack;
 using NetModel;
 
@@ -100,7 +99,7 @@ internal static class Program
 				float timeout = (float)parsed.GetValue(timeout_opt);
 				if (timeout < 0) timeout = 30;
 
-				Result<Peer> result = await Network.Instance!.TryAdmit(local: ep =>
+				Peer peer = await Network.Instance!.Admit(local: ep =>
 				{
 					Console.WriteLine("Admitting on {0}\n", ep);
 				}, remote: Task.Run(async () =>
@@ -112,14 +111,8 @@ internal static class Program
 
 					return IPEndPoint.Parse(raw);
 				}), timeout);
-
-				if (result.IsSuccess)
-				{
-					Console.WriteLine("Connection esablished with Peer [{0}]", result.Value.Id);
-				} else
-				{
-					Console.Error.WriteLine(string.Join("\n", result.Errors.Select(error => error.Message)));
-				}
+				
+				Console.WriteLine("Connection esablished with Peer [{0}]", peer.Id);
 			});
 			root_cmd.Add(admit_cmd);
 
@@ -132,7 +125,7 @@ internal static class Program
 				float timeout = (float)parsed.GetValue(timeout_opt);
 				if (timeout < 0) timeout = 30;
 
-				Result<Peer> result = await Network.Instance!.TryJoin(local: ep =>
+				await Network.Instance!.Join(local: ep =>
 				{
 					Console.WriteLine("Waiting on {0}", ep);
 				}, remote: Task.Run(async () =>
@@ -144,15 +137,8 @@ internal static class Program
 
 					return IPEndPoint.Parse(raw);
 				}), timeout);
-
-				if (result.IsSuccess)
-				{
-					Console.WriteLine("Connection esablished with host");
-				}
-				else
-				{
-					Console.Error.WriteLine(string.Join("\n", result.Errors.Select(error => error.Message)));
-				}
+				
+				Console.WriteLine("Connection esablished with host");
 			});
 			root_cmd.Add(join_cmd);
 			

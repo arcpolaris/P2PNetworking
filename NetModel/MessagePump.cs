@@ -5,14 +5,14 @@ using System.Linq;
 
 namespace NetModel;
 
-internal partial class MessageQueue(MessageRegistry registry)
+internal partial class MessagePump(MessageRegistry registry)
 {
-	private Dictionary<NetKey, PeerInfo> buffers = [];
+	private Dictionary<NetKey, PeerInfo> infos = [];
 	private MessageRegistry registry = registry;
 
 	public void ProcessFrame()
 	{
-		foreach (PeerInfo info in buffers.Values)
+		foreach (PeerInfo info in infos.Values)
 		{
 			var packets = info.JitterBuffer.Consume();
 			foreach (Packet packet in packets)
@@ -23,31 +23,31 @@ internal partial class MessageQueue(MessageRegistry registry)
 				}
 				foreach (IMessage message in packet.Messages)
 				{
-					InvokeLocal(info.Peer, message);
+					Dispatch(info.Peer, message);
 				}
 			}
 		}
 	}
 
-	public void Subscribe(DirectPeer peer)
+	public void Subscribe(SocketPeer peer)
 	{
-		buffers.Add(peer.Id, new(peer));
+		infos.Add(peer.Id, new(peer));
 		peer.Socket.OnFrameReceived += data => SocketCallback(peer, data);
 	}
 
-	public void Remove(DirectPeer peer)
+	public void Remove(SocketPeer peer)
 	{
-		buffers.Remove(peer.Id);
+		infos.Remove(peer.Id);
 	}
 
 	private void SocketCallback(Peer peer, ArraySegment<byte> data)
 	{
 		Packet packet = registry.Digest(data);
 		if (packet is null) return;
-		buffers[peer.Id].JitterBuffer.Add(packet);
+		infos[peer.Id].JitterBuffer.Add(packet);
 
 #if DEBUG
-		Trace.WriteLine($"Packet {packet.Timestamp} From {peer.Id} | {(packet.IsReliable ? "Reliable" : "Unreliable")}");
+		Trace.WriteLine($"Packet {packet.Sequence} From {peer.Id} | {(packet.IsReliable ? "Reliable" : "Unreliable")}");
 		Trace.Indent();
 		foreach (var msg in packet.Messages.Select(m => m.GetType().ToString()))
 			Trace.WriteLine(msg);
@@ -57,13 +57,13 @@ internal partial class MessageQueue(MessageRegistry registry)
 
 	public void SendFrame()
 	{
-		foreach (PeerInfo info in buffers.Values)
+		foreach (PeerInfo info in infos.Values)
 		{
-			info.UpdateTimestamps();
+			info.AdvanceSequence();
 
 			if (DateTime.UtcNow.Subtract(info.LastPing) >= TimeSpan.FromSeconds(0.1))
 			{
-				InvokeRemote(info.Peer, new Ping());
+				Trigger(info.Peer, new Ping());
 				info.LastPing = DateTime.UtcNow;
 			}
 
@@ -77,9 +77,9 @@ internal partial class MessageQueue(MessageRegistry registry)
 				info.OutboundReliable = new Packet { IsReliable = true };
 			}
 
-			if (info.AckTracker.GenAck(info.Timestamp, out var ack))
+			if (info.AckTracker.GenAck(info.Sequence, out var ack))
 			{
-				InvokeRemote(info.Peer, ack);
+				Trigger(info.Peer, ack);
 			}
 
 			if (info.Outbound.Messages.Count > 0)
@@ -90,9 +90,9 @@ internal partial class MessageQueue(MessageRegistry registry)
 				info.Outbound = new Packet() { IsReliable = false };
 			}
 
-			foreach (var packet in info.AckTracker.FlushResends(info.Timestamp))
+			foreach (var packet in info.AckTracker.FlushResends(info.Sequence))
 			{
-				info.Timestamp++;
+				info.Sequence++;
 
 				byte[] digest = registry.Marshal(packet);
 				info.Peer.Socket.Send(digest);
@@ -101,15 +101,15 @@ internal partial class MessageQueue(MessageRegistry registry)
 		}
 	}
 
-	internal void InvokeRemote<T>(Peer target, T message, bool reliable = false) where T : class, IMessage
+	internal void Trigger<T>(Peer target, T message, bool reliable = false) where T : class, IMessage
 	{
-		if (target is not DirectPeer) throw new ArgumentException("Cannot invoke on indirect remote peer");
-		PeerInfo info = buffers[target.Id];
+		if (target is not SocketPeer) throw new ArgumentException("Cannot invoke on indirect remote peer");
+		PeerInfo info = infos[target.Id];
 		Packet outbound = reliable ? info.OutboundReliable : info.Outbound;
 		outbound.Messages.Add(message);
 	}
 
-	private void InvokeLocal(Peer from, IMessage message)
+	private void Dispatch(Peer from, IMessage message)
 	{
 		NetKey key = registry.Lookup(message.GetType());
 		var rpc = registry.GetRpc(key);
