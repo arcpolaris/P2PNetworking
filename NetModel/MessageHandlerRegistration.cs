@@ -3,13 +3,13 @@
 namespace NetModel;
 
 /// <summary>
-/// Binds an <see cref="Rpc{T}"/> and provides dynamic typing
+/// Binds an <see cref="MessageHandler{T}"/> and provides dynamic typing
 /// </summary>
 /// <typeparam name="T"></typeparam>
 /// <param name="rpc"></param>
-internal class RpcRegistration<T>(Rpc<T> rpc) : IRpcRegistration where T : class, IMessage
+internal class MessageHandlerRegistration<T>(MessageHandler<T> rpc) : IMessageHandler where T : class, IMessage
 {
-	public Rpc<T> Rpc { get; } = rpc;
+	public MessageHandler<T> Rpc { get; } = rpc;
 
 	public Type Type => typeof(T);
 

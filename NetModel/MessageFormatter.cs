@@ -7,9 +7,9 @@ namespace NetModel;
 
 [SuppressMessage("Usage", "MsgPack013:Inaccessible formatter", Justification = "Formatter will always be used as an instance")]
 [SuppressMessage("CodeQuality", "IDE0079:Remove unnecessary suppression")]
-internal class MessageFormatter(IMessageLookup lookup) : IMessagePackFormatter<IMessage?>
+internal class MessageFormatter(MessageRegistry lookup) : IMessagePackFormatter<IMessage?>
 {
-	IMessageLookup Lookup { get; init; } = lookup;
+	MessageRegistry Lookup { get; init; } = lookup;
 
 	public void Serialize(ref MessagePackWriter writer, IMessage? value, MessagePackSerializerOptions options)
 	{

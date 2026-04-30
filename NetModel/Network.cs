@@ -274,7 +274,7 @@ public sealed class Network : IDisposable
 		}
 	}
 
-	public void Register<T>(NetKey key, Rpc<T> rpc) where T : class, IMessage
+	public void Register<T>(NetKey key, MessageHandler<T> rpc) where T : class, IMessage
 	{
 		MessageRegistry.Register<T>(key, rpc);
 	}

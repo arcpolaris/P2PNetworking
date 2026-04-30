@@ -6,9 +6,9 @@ using MessagePack.Resolvers;
 
 namespace NetModel;
 
-internal class MessageRegistry : IMessageLookup
+internal class MessageRegistry
 {
-	private IDictionary<NetKey, IRpcRegistration> rpcLookup = new Dictionary<NetKey, IRpcRegistration>();
+	private IDictionary<NetKey, IMessageHandler> rpcLookup = new Dictionary<NetKey, IMessageHandler>();
 	private IDictionary<Type, NetKey> typeLookup = new Dictionary<Type, NetKey>();
 
 	private MessagePackSerializerOptions serializerOptions;
@@ -41,12 +41,12 @@ internal class MessageRegistry : IMessageLookup
 		return typeLookup[type];
 	}
 
-	public MessageRegistry Register<T>(NetKey key, Rpc<T> procedure) where T : class, IMessage
+	public MessageRegistry Register<T>(NetKey key, MessageHandler<T> procedure) where T : class, IMessage
 	{
 		if (rpcLookup.IsReadOnly)
 			throw new InvalidOperationException("The registry has been frozen");
 
-		RpcRegistration<T> registration = new(procedure);
+		MessageHandlerRegistration<T> registration = new(procedure);
 
 		rpcLookup.Add(key, registration);
 		typeLookup.Add(typeof(T), key);
@@ -54,11 +54,11 @@ internal class MessageRegistry : IMessageLookup
 		return this;
 	}
 
-	internal IRpcRegistration GetRpc(NetKey key) => rpcLookup[key];
+	internal IMessageHandler GetRpc(NetKey key) => rpcLookup[key];
 
 	internal void Freeze()
 	{
-		if (rpcLookup is FrozenDictionary<NetKey, IRpcRegistration>)
+		if (rpcLookup is FrozenDictionary<NetKey, IMessageHandler>)
 			return;
 
 		rpcLookup = rpcLookup.ToFrozenDictionary();
