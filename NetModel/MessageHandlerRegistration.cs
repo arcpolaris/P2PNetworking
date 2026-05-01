@@ -6,11 +6,13 @@ namespace NetModel;
 /// Binds an <see cref="MessageHandler{T}"/> and provides dynamic typing
 /// </summary>
 /// <typeparam name="T"></typeparam>
-/// <param name="rpc"></param>
-internal class MessageHandlerRegistration<T>(MessageHandler<T> rpc) : IMessageHandler where T : class, IMessage
+/// <param name="handler"></param>
+internal class MessageHandlerRegistration<T>(MessageHandler<T> handler) : IMessageHandlerRegistration where T : class, IMessage
 {
-	public MessageHandler<T> Rpc { get; } = rpc;
+	/// <inheritdoc/>
+	public MessageHandler<T> Handler { get; } = handler;
 
+	/// <inheritdoc/>
 	public Type Type => typeof(T);
 
 	/// <summary>
@@ -22,6 +24,6 @@ internal class MessageHandlerRegistration<T>(MessageHandler<T> rpc) : IMessageHa
 	public void Invoke(Peer sender, object message)
 	{
 		if (message is not T cast) throw new ArgumentException($"Message was not of type {typeof(T)}", nameof(message));
-		Rpc.Invoke(sender, cast);
+		Handler.Invoke(sender, cast);
 	}
 }

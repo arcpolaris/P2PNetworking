@@ -3,35 +3,36 @@ using System.Diagnostics.CodeAnalysis;
 using MessagePack;
 using MessagePack.Formatters;
 
-namespace NetModel;
-
-[SuppressMessage("Usage", "MsgPack013:Inaccessible formatter", Justification = "Formatter will always be used as an instance")]
-[SuppressMessage("CodeQuality", "IDE0079:Remove unnecessary suppression")]
-internal class MessageFormatter(MessageRegistry lookup) : IMessagePackFormatter<IMessage?>
+namespace NetModel
 {
-	MessageRegistry Lookup { get; init; } = lookup;
-
-	public void Serialize(ref MessagePackWriter writer, IMessage? value, MessagePackSerializerOptions options)
+	[SuppressMessage("Usage", "MsgPack013:Inaccessible formatter", Justification = "Formatter will always be used as an instance")]
+	[SuppressMessage("CodeQuality", "IDE0079:Remove unnecessary suppression")]
+	internal class MessageFormatter(MessageRegistry lookup) : IMessagePackFormatter<IMessage?>
 	{
-		if (value is null)
+		MessageRegistry Lookup { get; init; } = lookup;
+
+		public void Serialize(ref MessagePackWriter writer, IMessage? value, MessagePackSerializerOptions options)
 		{
-			writer.WriteNil();
-			return;
+			if (value is null)
+			{
+				writer.WriteNil();
+				return;
+			}
+
+			Type type = value.GetType();
+			NetKey key = Lookup.Lookup(type);
+
+			writer.Write(key);
+			MessagePackSerializer.Serialize(type, ref writer, value, options);
 		}
 
-		Type type = value.GetType();
-		NetKey key = Lookup.Lookup(type);
+		public IMessage Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)
+		{
+			if (reader.TryReadNil()) return null!;
+			NetKey key = reader.ReadUInt16();
+			Type type = Lookup.Lookup(key);
 
-		writer.Write(key);
-		MessagePackSerializer.Serialize(type, ref writer, value, options);
-	}
-
-	public IMessage Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)
-	{
-		if (reader.TryReadNil()) return null!;
-		NetKey key = reader.ReadUInt16();
-		Type type = Lookup.Lookup(key);
-
-		return (IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!;
+			return (IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!;
+		}
 	}
 }

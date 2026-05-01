@@ -1,22 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace NetModel;
-
-internal sealed class Packet : IComparable<Packet>
+namespace NetModel
 {
-	public int Sequence { get; set; }
-
-	public bool IsReliable { get; set; }
-
-	public List<IMessage> Messages { get; set; } = [];
-
-	public int CompareTo(Packet other)
+	internal sealed class Packet : IComparable<Packet>
 	{
-		int raw = Sequence.CompareTo(other.Sequence);
-		if (raw != 0) return raw;
+		public int Sequence { get; set; }
 
-		// reliable packets go BEFORE unreliable ones
-		return -IsReliable.CompareTo(other.IsReliable);
+		public bool IsReliable { get; set; }
+
+		public List<IMessage> Messages { get; set; } = [];
+
+		public int CompareTo(Packet other)
+		{
+			int raw = Sequence.CompareTo(other.Sequence);
+			if (raw != 0) return raw;
+
+			// reliable packets go BEFORE unreliable ones
+			return -IsReliable.CompareTo(other.IsReliable);
+		}
 	}
 }

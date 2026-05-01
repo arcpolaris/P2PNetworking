@@ -3,86 +3,87 @@ using System.Collections.Generic;
 using System.Linq;
 using MessagePack;
 
-namespace NetModel;
-
-[MessagePackObject(AllowPrivate = true)]
-internal partial class Ping : IMessage
+namespace NetModel
 {
-	[Key(0)]
-	public DateTime Time { get; init; }
-
-	[SerializationConstructor]
-	private Ping(DateTime time) => Time = time;
-
-	public Ping() => Time = DateTime.UtcNow;
-}
-
-[MessagePackObject(AllowPrivate = true)]
-internal partial class Pong : IMessage
-{
-	[Key(0)]
-	public TimeSpan Delta { get; init; }
-
-	[SerializationConstructor]
-	private Pong(TimeSpan delta) => Delta = delta;
-
-	public Pong(Ping ping) => Delta = DateTime.UtcNow - ping.Time;
-}
-
-[MessagePackObject(AllowPrivate = true)]
-internal partial class AddPeers : IMessage
-{
-	[Key(0)]
-	public List<Peer> Peers { get; init; }
-
-	[SerializationConstructor]
-	public AddPeers(List<Peer> peers) => Peers = peers;
-
-	public AddPeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
-}
-
-// Use for DCing and telling others about DCs
-[MessagePackObject(AllowPrivate = true)]
-internal partial class RemovePeers : IMessage
-{
-	[Key(0)]
-	public List<Peer> Peers { get; init; }
-
-	[SerializationConstructor]
-	public RemovePeers(List<Peer> peers) => Peers = peers;
-
-	public RemovePeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
-	public RemovePeers(Peer peer) : this([peer]) { }
-}
-
-[MessagePackObject(AllowPrivate = true)]
-internal partial class SetId : IMessage
-{
-	[Key(0)]
-	public NetKey Id { get; init; }
-
-	[SerializationConstructor]
-	public SetId(NetKey id) => Id = id;
-}
-
-[MessagePackObject(AllowPrivate = true)]
-internal partial class Acknowledgement : IMessage
-{
-	[IgnoreMember]
-	public int Sequence { get; set; }
-
-	[Key(0)]
-	public uint BitField { get; init; }
-
-	[SerializationConstructor]
-	public Acknowledgement(uint bitField)
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class Ping : IMessage
 	{
-		BitField = bitField;
+		[Key(0)]
+		public DateTime Time { get; init; }
+
+		[SerializationConstructor]
+		private Ping(DateTime time) => Time = time;
+
+		public Ping() => Time = DateTime.UtcNow;
 	}
 
-	public void Deconstruct(out int sequence, out uint bitfield)
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class Pong : IMessage
 	{
-		sequence = Sequence;
-		bitfield = BitField;
+		[Key(0)]
+		public TimeSpan Delta { get; init; }
+
+		[SerializationConstructor]
+		private Pong(TimeSpan delta) => Delta = delta;
+
+		public Pong(Ping ping) => Delta = DateTime.UtcNow - ping.Time;
+	}
+
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class AddPeers : IMessage
+	{
+		[Key(0)]
+		public List<Peer> Peers { get; init; }
+
+		[SerializationConstructor]
+		public AddPeers(List<Peer> peers) => Peers = peers;
+
+		public AddPeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
+	}
+
+	// Use for DCing and telling others about DCs
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class RemovePeers : IMessage
+	{
+		[Key(0)]
+		public List<Peer> Peers { get; init; }
+
+		[SerializationConstructor]
+		public RemovePeers(List<Peer> peers) => Peers = peers;
+
+		public RemovePeers(IEnumerable<Peer> peers) : this(peers.ToList()) { }
+		public RemovePeers(Peer peer) : this([peer]) { }
+	}
+
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class SetId : IMessage
+	{
+		[Key(0)]
+		public NetKey Id { get; init; }
+
+		[SerializationConstructor]
+		public SetId(NetKey id) => Id = id;
+	}
+
+	[MessagePackObject(AllowPrivate = true)]
+	internal partial class Acknowledgement : IMessage
+	{
+		[IgnoreMember]
+		public int Sequence { get; set; }
+
+		[Key(0)]
+		public uint BitField { get; init; }
+
+		[SerializationConstructor]
+		public Acknowledgement(uint bitField)
+		{
+			BitField = bitField;
+		}
+
+		public void Deconstruct(out int sequence, out uint bitfield)
+		{
+			sequence = Sequence;
+			bitfield = BitField;
+		}
 	}
 }
