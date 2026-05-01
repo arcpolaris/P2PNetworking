@@ -1,9 +1,4 @@
-﻿namespace NetModel
-{
-	/// <summary>
-	/// Represents a target for message delivery
-	/// </summary>
-	public readonly record struct SendTarget(TargetKind Kind, Peer? Peer = null);
+﻿namespace NetModel;
 
 /// <summary>
 /// Represents a target for message delivery

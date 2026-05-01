@@ -12,7 +12,8 @@ namespace NetModel
 			infos[sender.Id].AckTracker.ConsumeAck(ack);
 		}
 
-		private class AckTracker(int sequence) {
+		private class AckTracker(int sequence)
+		{
 			private List<Packet> Unacknowledged { get; } = [];
 
 			// TODO: consolidate messages between packets
