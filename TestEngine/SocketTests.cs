@@ -36,7 +36,9 @@ public sealed class SocketTests
 
         using CancellationTokenSource cts = new();
 
-        var poll = Task.WhenAll(sock1.StartPolling(cts.Token), sock2.StartPolling(cts.Token));
+        cts.Token.Register(() => { sock1.Dispose(); sock2.Dispose(); });
+
+        var poll = Task.WhenAll(sock1.StartPolling(), sock2.StartPolling());
 
         var io = Task.Run(async () =>
         {
@@ -115,10 +117,11 @@ public sealed class SocketTests
         Debug.WriteLine($"{publicEP} ---> {remoteEP}");
 
 		using CancellationTokenSource cts = new();
+        cts.Token.Register(sock.Dispose);
 		cts.CancelAfter(TimeSpan.FromSeconds(12));
 
 		var punch = sock.HolePunch(punch_probe, cts.Token);
-		var poll = sock.StartPolling(cts.Token);
+		var poll = sock.StartPolling();
 
 		var io = Task.Run(async () =>
 		{

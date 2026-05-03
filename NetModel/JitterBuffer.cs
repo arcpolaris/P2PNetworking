@@ -55,7 +55,7 @@ internal class JitterBuffer
 
 		// at this point we *should* only be one over cap
 		int drop = buffer.FindIndex(static p => !p.IsReliable);
-		Debug.WriteLine(buffer[drop]);
+		Trace.WriteLine(buffer[drop]);
 		buffer.RemoveAt(drop);
 	}
 

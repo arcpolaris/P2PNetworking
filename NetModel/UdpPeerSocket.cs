@@ -13,15 +13,15 @@ internal class UdpPeerSocket : IDisposable
 	public const int max_packet_size = 1024;
 	internal Socket _socket;
 
-	private CancellationTokenSource? pollingCTS;
+	private bool _disposed = false;
 
 	public UdpPeerSocket()
 	{
 		_socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
 		{
-			Blocking = false,
+			Blocking = true, // non-blocking causes unity issues maybe
 			ExclusiveAddressUse = true,
-			DontFragment = true
+			DontFragment = true,
 		};
 	}
 
@@ -34,8 +34,8 @@ internal class UdpPeerSocket : IDisposable
 
 	public void Dispose()
 	{
-		pollingCTS?.Cancel();
 		_socket.Dispose();
+		_disposed = true;
 	}
 
 	public IPEndPoint LocalEndPoint => (IPEndPoint)_socket.LocalEndPoint;
@@ -48,7 +48,7 @@ internal class UdpPeerSocket : IDisposable
 
 	public async Task SendAsync(ArraySegment<byte> data)
 	{
-		await _socket.SendAsync(data, SocketFlags.None);
+		await _socket.SendAsync(data, SocketFlags.None).ConfigureAwait(false);
 	}
 
 	public void SetRemote(IPEndPoint ep)
@@ -62,8 +62,8 @@ internal class UdpPeerSocket : IDisposable
 		{
 			try
 			{
-				await _socket.SendAsync(probe, SocketFlags.None, ct);
-				await Task.Delay(250, ct);
+				await _socket.SendAsync(probe, SocketFlags.None, ct).ConfigureAwait(false);
+				await Task.Delay(250, ct).ConfigureAwait(false);
 			}
 			catch (OperationCanceledException) { break; }
 		}
@@ -75,40 +75,28 @@ internal class UdpPeerSocket : IDisposable
 		{
 			try
 			{
-				await _socket.SendAsync(probe(), SocketFlags.None, ct);
-				await Task.Delay(250, ct);
+				await _socket.SendAsync(probe(), SocketFlags.None, ct).ConfigureAwait(false);
+				await Task.Delay(250, ct).ConfigureAwait(false);
 			}
 			catch (OperationCanceledException) { break; }
 		}
 	}
 
-	public async Task StartPolling(CancellationToken ct = default)
+	public async Task StartPolling()
 	{
-		if (ct == default)
-		{
-			pollingCTS = new();
-			ct = pollingCTS.Token;
-		}
-		while (!ct.IsCancellationRequested)
-		{
+		while (!_disposed) {
 			byte[] buffer = new byte[max_packet_size];
 			int read;
 			try
 			{
-				read = await _socket.ReceiveAsync(buffer, SocketFlags.None, ct);
+				read = await Task.Run(() => _socket.Receive(buffer)).ConfigureAwait(false);
 			}
 			catch (OperationCanceledException) { break; }
-			if (read <= 0) break;
+			catch (ObjectDisposedException) { break; }
+			catch (SocketException e) when (e.SocketErrorCode is SocketError.Interrupted) { break; }
 			ArraySegment<byte> segment = new(buffer, 0, read);
 			OnFrameReceived?.Invoke(segment);
 		}
-	}
-
-	public void EndPolling()
-	{
-		pollingCTS!.Cancel();
-		pollingCTS.Dispose();
-		pollingCTS = null;
 	}
 
 	public event Action<ArraySegment<byte>>? OnFrameReceived;
@@ -116,7 +104,7 @@ internal class UdpPeerSocket : IDisposable
 	public async Task<IPEndPoint> STUN()
 	{
 		Socket _socket = this._socket;
-		IPAddress stunIP = (await Dns.GetHostAddressesAsync("stun.l.google.com")).First(addr => addr.AddressFamily == AddressFamily.InterNetwork);
+		IPAddress stunIP = (await Dns.GetHostAddressesAsync("stun.l.google.com").ConfigureAwait(false)).First(addr => addr.AddressFamily == AddressFamily.InterNetwork);
 		IPEndPoint stunEP = new(stunIP, 19302);
 
 		byte[] buffer = new byte[52];
@@ -131,7 +119,7 @@ internal class UdpPeerSocket : IDisposable
 
 		rnd.NextBytes(sendBuffer.Slice(8, 12));
 
-		await _socket.SendToAsync(sendBuffer, SocketFlags.None, stunEP);
+		await _socket.SendToAsync(sendBuffer, SocketFlags.None, stunEP).ConfigureAwait(false);
 
 		//int read = await Task.Run(() =>
 		//{
@@ -148,7 +136,7 @@ internal class UdpPeerSocket : IDisposable
 		int read;
 		try
 		{
-			read = await _socket.ReceiveAsync(recBuffer, SocketFlags.None);
+			read = await _socket.ReceiveAsync(recBuffer, SocketFlags.None).ConfigureAwait(false);
 		}
 		catch (SocketException e) when (e.SocketErrorCode is SocketError.OperationAborted)
 		{

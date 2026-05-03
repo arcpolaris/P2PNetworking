@@ -152,12 +152,18 @@ public sealed class Network : IDisposable
 		};
 	}
 
+	/// <summary>
+	/// Constructs <see cref="Instance"/> as a host
+	/// </summary>
 	public static void InitializeHost()
 	{
 		ThrowIfAlreadyInitialized();
 		Instance = ConstructHost();
 	}
 
+	/// <summary>
+	/// Constructs <see cref="Instance"/> as a client
+	/// </summary>
 	public static void InitializeClient()
 	{
 		ThrowIfAlreadyInitialized();
@@ -177,14 +183,18 @@ public sealed class Network : IDisposable
 
 	private static async Task<UdpPeerSocket> Uplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
+#if DEBUG
+		Trace.WriteLine(SynchronizationContext.Current?.GetType().Name ?? "null");
+#endif
+
 		UdpPeerSocket socket = new();
 		socket.BindAny();
-		IPEndPoint stun = await socket.STUN();
+		IPEndPoint stun = await socket.STUN().ConfigureAwait(false);
 		local(stun);
-		var remoteEP = await remote;
+		var remoteEP = await remote.ConfigureAwait(false);
 		socket.SetRemote(remoteEP);
 
-		Debug.WriteLine($"[{socket.LocalEndPoint}]/[{stun}] Uplinking with {remoteEP}...");
+		Trace.WriteLine($"[{socket.LocalEndPoint}]/[{stun}] Uplinking with {remoteEP}...");
 
 		bool got_msg = false; // our hole is punched
 		bool got_ack = false;
@@ -201,7 +211,7 @@ public sealed class Network : IDisposable
 
 		void TempMessageHandler(ArraySegment<byte> data)
 		{
-			Debug.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {Encoding.UTF8.GetString(data)} {(got_msg ? "X" : "")}");
+			Trace.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {data.Count}/[{string.Join(" ", data.Select(b => b.ToString("X2")))}] {(got_msg ? "+" : "-")}");
 			if (data.AsSpan().SequenceEqual(msg)) got_msg = true;
 			else if (data.AsSpan().SequenceEqual(ack) && !got_ack)
 			{
@@ -215,10 +225,10 @@ public sealed class Network : IDisposable
 		socket.OnFrameReceived += TempMessageHandler;
 		cts.CancelAfter((int)(1000 * punchTimeout));
 
-		_ = socket.StartPolling();
-		await socket.HolePunch(GetProbe, cts.Token);
+		Task polling = socket.StartPolling();
+		await socket.HolePunch(GetProbe, cts.Token).ConfigureAwait(false);
 
-		if (!got_msg)
+		if (!got_ack)
 		{
 			socket.Dispose();
 			throw new TimeoutException("Hole punching killed for exceeding timeout");
@@ -228,18 +238,12 @@ public sealed class Network : IDisposable
 		return socket;
 	}
 
-	/// <summary>
-	/// 
-	/// </summary>
-	/// <param name="local"></param>
-	/// <param name="remote"></param>
-	/// <param name="punchTimeout"></param>
-	/// <returns></returns>
+	
 	public async Task<Peer> Admit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotHost();
 
-		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout);
+		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout).ConfigureAwait(false);
 
 		SocketPeer peer = new(++h_peerSequence, socket, socket.RemoteEndPoint);
 		peers.Add(peer);
@@ -257,7 +261,7 @@ public sealed class Network : IDisposable
 	{
 		ThrowIfNotClient();
 
-		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout);
+		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout).ConfigureAwait(false);
 
 		SocketPeer peer = new(0, socket, socket.RemoteEndPoint);
 		peers.Add(peer);
@@ -364,10 +368,15 @@ public sealed class Network : IDisposable
 		Instance = null;
 	}
 
+	/// <summary>
+	/// Gets the working IP Address from <a href="https://api.ipify.org">api.ipify.org</a>
+	/// </summary>
+	/// <returns>The working public IP Address</returns>
+	/// <exception cref="HttpRequestException" />
 	public static async Task<IPAddress> GetPublicIP()
 	{
 		using HttpClient client = new();
-		string ip = await client.GetStringAsync("https://api.ipify.org");
+		string ip = await client.GetStringAsync("https://api.ipify.org").ConfigureAwait(false);
 
 		return IPAddress.Parse(ip);
 	}
