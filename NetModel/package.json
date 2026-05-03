@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json.schemastore.org/unity-package-manifest.json",
+  "version": "0.0.0",
+  "author": "polaris",
+  "name": "com.arcpolaris.netmodel",
+  "displayName": "NetModel",
+  "unity": "2022.3"
+}
