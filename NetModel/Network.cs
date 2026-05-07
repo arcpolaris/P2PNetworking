@@ -124,7 +124,8 @@ public sealed class Network : IDisposable
 			ThrowIfNotClient();
 
 			MyId = setId.Id;
-		}).Register<Acknowledgement>(5, MessageQueue.ConsumeAck);
+		}).Register<Acknowledgement>(5, MessageQueue.ConsumeAck)
+		.Register<Ring>(6, (_,_) => { });
 	}
 
 	private static void ThrowIfAlreadyInitialized()
@@ -151,6 +152,8 @@ public sealed class Network : IDisposable
 			IsHost = false,
 		};
 	}
+
+	//TODO: have message registration be done at construction time
 
 	/// <summary>
 	/// Constructs <see cref="Instance"/> as a host
@@ -181,14 +184,23 @@ public sealed class Network : IDisposable
 		MessageRegistry.Freeze();
 	}
 
-	private static async Task<UdpPeerSocket> Uplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
+	/// <summary>
+	/// Attempts to connect to a remote UDP endpoint via NAT hole-punching
+	/// </summary>
+	/// <param name="local">A callback that is executed when the local <see cref="IPEndPoint"/> has been discovered via STUN</param>
+	/// <param name="remote">An awaitable method that is used to defer the assignment of the remote <see cref="IPEndPoint"/></param>
+	/// <param name="punchTimeout">The time in seconds for how long to wait for connection with the remote after <paramref name="remote"/> yields a value</param>
+	/// <returns>The <see cref="UdpPeerSocket"/> representing the remote peer</returns>
+	/// <exception cref="TimeoutException"></exception>
+	private async Task<UdpPeerSocket> Uplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
-#if DEBUG
-		Trace.WriteLine(SynchronizationContext.Current?.GetType().Name ?? "null");
-#endif
+		if (SynchronizationContext.Current is SynchronizationContext syncCtx)
+		{
+			Trace.WriteLine(syncCtx.GetType().Name, "info");
+		}
 
 		UdpPeerSocket socket = new();
-		socket.BindAny();
+		socket.BindRange(10600, 10799);
 		IPEndPoint stun = await socket.STUN().ConfigureAwait(false);
 		local(stun);
 		var remoteEP = await remote.ConfigureAwait(false);
@@ -196,39 +208,42 @@ public sealed class Network : IDisposable
 
 		Trace.WriteLine($"[{socket.LocalEndPoint}]/[{stun}] Uplinking with {remoteEP}...");
 
-		bool got_msg = false; // our hole is punched
-		bool got_ack = false;
+		int ack_seq = 0;
 
-		//if either peer gets an ack, we're good
-		//FIXME: we should really use some other than skipping deserialization with a nil (like an actual message)
-		//IDEA: use a message that keeps track of the highest ack sequence, and ramp down timeout as we get more seqs
-		byte[] msg = [0xC0, .. "MESSAGE"u8];
-		byte[] ack = [0xC0, .. "ACKNLGE"u8];
+		//TODO: have the timer halve the current value
 
-		byte[] GetProbe() => got_msg ? ack : msg;
+		byte[] GetProbe()
+		{
+			return MessageRegistry.Marshal(new Packet { Sequence = -1, IsReliable = false, Messages = [new Ring(ack_seq + 1)] });
+		}
 
 		using CancellationTokenSource cts = new();
 
 		void TempMessageHandler(ArraySegment<byte> data)
 		{
-			Trace.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {data.Count}/[{string.Join(" ", data.Select(b => b.ToString("X2")))}] {(got_msg ? "+" : "-")}");
-			if (data.AsSpan().SequenceEqual(msg)) got_msg = true;
-			else if (data.AsSpan().SequenceEqual(ack) && !got_ack)
+			Trace.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {data.Count}/[{string.Join(" ", data.Select(b => b.ToString("X2")))}] {ack_seq}");
+			Packet packet = MessageRegistry.Digest(data);
+
+			if (packet is not { Sequence: -1, IsReliable: false, Messages: [Ring ring] })
+				cts.Cancel(); // other side is done
+			else
 			{
-				got_msg = true;
-				got_ack = true;
-				//their hole is punched, so we don't need to keep punching
-				cts.CancelAfter(500);
+				ack_seq = ring.Sequence;
+
+				double remaining = punchTimeout / Math.Pow(2, ack_seq);
+				Trace.WriteLine(remaining);
+				if (remaining > 0.5)
+					cts.CancelAfter(TimeSpan.FromSeconds(remaining));
 			}
 		}
 
 		socket.OnFrameReceived += TempMessageHandler;
-		cts.CancelAfter((int)(1000 * punchTimeout));
+		cts.CancelAfter(TimeSpan.FromSeconds(punchTimeout));
 
 		Task polling = socket.StartPolling();
 		await socket.HolePunch(GetProbe, cts.Token).ConfigureAwait(false);
 
-		if (!got_ack)
+		if (ack_seq < 3)
 		{
 			socket.Dispose();
 			throw new TimeoutException("Hole punching killed for exceeding timeout");
@@ -238,7 +253,15 @@ public sealed class Network : IDisposable
 		return socket;
 	}
 
-	
+	/// <summary>
+	/// Uplink with a remote peer, with the local instace acting as the host
+	/// </summary>
+	/// <param name="local">Called with the public endpoint for the local socket</param>
+	/// <param name="remote">Asynchronously provides the public endpoint for the remote socket</param>
+	/// <param name="punchTimeout">The time in seconds that hole punching should be attempted before a <see cref="TimeoutException" /> is thrown</param>
+	/// <returns>The admitted client</returns>
+	/// <exception cref="InvalidOperationException" />
+	/// <exception cref="TimeoutException" />
 	public async Task<Peer> Admit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotHost();
@@ -256,7 +279,15 @@ public sealed class Network : IDisposable
 		return peer;
 	}
 
-
+	/// <summary>
+	/// Uplink with a remote peer, with the local instace acting as a client
+	/// </summary>
+	/// <param name="local">Called with the public endpoint for the local socket</param>
+	/// <param name="remote">Asynchronously provides the public endpoint for the remote socket</param>
+	/// <param name="punchTimeout">The time in seconds that hole punching should be attempted before a <see cref="TimeoutException" /> is thrown</param>
+	/// <returns>The admitted client</returns>
+	/// <exception cref="InvalidOperationException" />
+	/// <exception cref="TimeoutException" />
 	public async Task<Peer> Join(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotClient();
@@ -279,6 +310,12 @@ public sealed class Network : IDisposable
 		MessageQueue.SendFrame();
 	}
 
+	/// <summary>
+	/// Communicates to all connected peers - other than <paramref name="peer"/> - to remove <paramref name="peer"/> from their peer lists.
+	/// Also removes and closes the connection with <paramref name="peer"/>
+	/// </summary>
+	/// <remarks>Only valid for a host</remarks>
+	/// <exception cref="InvalidOperationException" />
 	public void Kick(Peer peer)
 	{
 		ThrowIfNotHost();
@@ -317,45 +354,55 @@ public sealed class Network : IDisposable
 		MessageRegistry.Register<T>(key, rpc);
 	}
 
+	/// <summary>
+	/// <list type="table">
+	/// <item>
+	/// <term>As Host</term>
+	/// <description>Sends <paramref name="message"/> to all peers</description>
+	/// </item>
+	/// <item>
+	/// <term>As Client</term>
+	/// <description>Sends <paramref name="message"/> to <see cref="Host"/></description>
+	/// </item>
+	/// </list>
+	/// </summary>
 	public void Send<T>(T message, bool reliable = false) where T : class, IMessage
-		=> Send(new(IsHost ? TargetKind.AllClients : TargetKind.Host, null), message, reliable);
-
-	public void SendTo<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
-		=> Send(TargetKind.Client, peer, message, reliable);
-
-	public void SendToAllExcept<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
-		=> Send(TargetKind.AllClientsExcept, peer, message, reliable);
-
-	public void Send<T>(TargetKind targetKind, Peer peer, T message, bool reliable = false) where T : class, IMessage
-		=> Send(new(targetKind, peer), message, reliable);
-
-	public void Send<T>(in SendTarget target, T message, bool reliable = false) where T : class, IMessage
 	{
-		switch (target.Kind)
+		if (IsHost)
 		{
-			case TargetKind.Host:
-				ThrowIfNotClient();
-				MessageQueue.Trigger(c_host!, message, reliable);
-				break;
-			case TargetKind.Client:
-				ThrowIfNotHost();
-				MessageQueue.Trigger(target.Peer!, message, reliable);
-				break;
-			case TargetKind.AllClients:
-				ThrowIfNotHost();
-				foreach (Peer peer in peers)
-				{
-					MessageQueue.Trigger(peer, message, reliable);
-				}
-				break;
-			case TargetKind.AllClientsExcept:
-				ThrowIfNotHost();
-				foreach (Peer peer in peers)
-				{
-					if (peer == target.Peer) continue;
-					MessageQueue.Trigger(peer, message, reliable);
-				}
-				break;
+			foreach (Peer p in peers)
+			{
+				MessageQueue.Trigger(p, message, reliable);
+			}
+		} else
+		{
+			MessageQueue.Trigger(c_host!, message, reliable);
+		}
+	}
+
+	/// <summary>
+	/// Sends <paramref name="message"/> to <paramref name="peer"/>
+	/// </summary>
+	/// <remarks>Only valid for a host</remarks>
+	/// <exception cref="InvalidOperationException" />
+	public void SendTo<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
+	{
+		ThrowIfNotHost();
+		MessageQueue.Trigger(peer!, message, reliable);
+	}
+
+	/// <summary>
+	/// Sends <paramref name="message"/> to all connected peers other than <paramref name="peer"/>
+	/// </summary>
+	/// <remarks>Only valid for a host</remarks>
+	/// <exception cref="InvalidOperationException" />
+	public void SendToAllExcept<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
+	{
+		ThrowIfNotHost();
+		foreach (Peer p in peers)
+		{
+			if (p == peer) continue;
+			MessageQueue.Trigger(p, message, reliable);
 		}
 	}
 
@@ -381,6 +428,7 @@ public sealed class Network : IDisposable
 		return IPAddress.Parse(ip);
 	}
 
+	/// <exception cref="InvalidOperationException"></exception>
 	private void ThrowIfNotHost()
 	{
 		if (IsHost) return;
@@ -388,6 +436,7 @@ public sealed class Network : IDisposable
 		throw new InvalidOperationException("This method is only valid for a host");
 	}
 
+	/// <exception cref="InvalidOperationException"></exception>
 	private void ThrowIfNotClient()
 	{
 		if (IsClient) return;

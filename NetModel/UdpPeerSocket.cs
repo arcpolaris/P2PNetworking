@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -25,12 +26,35 @@ internal class UdpPeerSocket : IDisposable
 		};
 	}
 
+	/// <inheritdoc cref="Socket.Bind(EndPoint)"/>
 	public void Bind(int port)
 	{
 		_socket.Bind(new IPEndPoint(IPAddress.Any, port));
 	}
 
 	public void BindAny() => Bind(0);
+
+	public void BindRange(int min, int max)
+	{
+		if (max < min) throw new ArgumentException("Max port must be less than min port");
+		if (min < IPEndPoint.MinPort) throw new ArgumentOutOfRangeException(nameof(min));
+		if (max > IPEndPoint.MaxPort) throw new ArgumentOutOfRangeException(nameof(max));
+
+		List<Exception> exceptions = [];
+
+		for (int port = min; port <= max; port++)
+		{
+			try
+			{
+				Bind(port);
+				return;
+			} catch (SocketException e) when (e.SocketErrorCode is SocketError.AddressAlreadyInUse)
+			{
+				exceptions.Add(e);
+			}
+		}
+		throw new AggregateException(exceptions);
+	}
 
 	public void Dispose()
 	{
