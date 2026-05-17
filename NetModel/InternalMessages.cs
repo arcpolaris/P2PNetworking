@@ -68,15 +68,16 @@ internal partial class SetId : IMessage
 [MessagePackObject(AllowPrivate = true)]
 internal partial class Acknowledgement : IMessage
 {
-	[IgnoreMember]
+	[Key(0)]
 	public int Sequence { get; set; }
 
-	[Key(0)]
+	[Key(1)]
 	public uint BitField { get; init; }
 
 	[SerializationConstructor]
-	public Acknowledgement(uint bitField)
+	public Acknowledgement(int sequence, uint bitField)
 	{
+		Sequence = sequence;
 		BitField = bitField;
 	}
 
@@ -93,7 +94,7 @@ internal partial class Ring : IMessage
 	[Key(0)]
 	public int Sequence { get; init; }
 	[Key(1)]
-	private byte[] Slag { get; } = new byte[128];
+	private byte[] Slag { get; } = new byte[8];
 
 	[SerializationConstructor]
 	private Ring(int sequence, byte[] slag)

@@ -13,7 +13,7 @@ internal class MessageRegistry
 
 	private MessagePackSerializerOptions serializerOptions;
 
-	public MessageRegistry()
+	public MessageRegistry(IFormatterResolver[] extraResolvers)
 	{
 		var messageFormatter = new MessageFormatter(this);
 		var packetFormatter = new PacketFormatter(this);
@@ -21,9 +21,10 @@ internal class MessageRegistry
 		var resolver = CompositeResolver.Create(
 			[
 				messageFormatter,
-					packetFormatter
+				packetFormatter
 			],
 			[
+				.. extraResolvers,
 				StandardResolver.Instance
 			]
 		);

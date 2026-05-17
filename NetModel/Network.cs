@@ -14,15 +14,10 @@ namespace NetModel;
 /// <summary>
 /// Manages peers, message routing, and connection lifecycle for one network session.
 /// </summary>
-public sealed class Network : IDisposable
+public sealed partial class Network : IDisposable
 {
-	/// <summary>
-	/// Provides the global <see cref="Network"/> singleton
-	/// </summary>
-	public static Network? Instance { get; private set; }
-
 	private readonly ObservableList<Peer> peers;
-	private MessageRegistry MessageRegistry { get; init; }
+	internal MessageRegistry MessageRegistry { get; init; }
 	private MessagePump MessageQueue { get; init; }
 
 	private Dictionary<NetKey, int> pingLookup = new();
@@ -81,107 +76,18 @@ public sealed class Network : IDisposable
 	/// <summary>
 	/// Provides an observable view onto the internal list of connected peers
 	/// </summary>
-	public NotifyCollectionChangedSynchronizedViewList<Peer> Peers { get; private init; }
+	public IObservableCollection<Peer> Peers { get; private init; }
 
-	private Network()
+	private Network(bool isHost, MessageRegistry registry)
 	{
 		peers = new ObservableList<Peer>();
-		Peers = peers.CreateView(static p => p).ToNotifyCollectionChanged();
+		Peers = peers;
 
-		MessageRegistry = new();
-		MessageQueue = new(MessageRegistry);
+		MessageRegistry = registry;
+		MessageQueue = new(this);
 
-		MessageRegistry
-		.Register<Ping>(0, (sender, ping) =>
-		{
-			if (IsHost) SendTo<Pong>(sender, new(ping));
-			else Send<Pong>(new(ping));
-		})
-		.Register<Pong>(1, (sender, pong) =>
-		{
-			pingLookup[sender.Id] = (int)pong.Delta.TotalMilliseconds;
-		})
-		.Register<AddPeers>(2, (sender, addPeers) =>
-		{
-			ThrowIfNotClient();
-			peers.AddRange(addPeers.Peers);
-		})
-		.Register<RemovePeers>(3, (sender, removePeers) =>
-		{
-			//FIXME
-			ThrowIfNotClient();
-
-			if (removePeers.Peers.Any(p => p.Id == MyId || p.Id == 0)) CloseSocket(c_host!);
-			else
-			{
-				foreach (Peer peer in removePeers.Peers)
-				{
-					peers.Remove(peer);
-				}
-			}
-		}).Register<SetId>(4, (sender, setId) =>
-		{
-			ThrowIfNotClient();
-
-			MyId = setId.Id;
-		}).Register<Acknowledgement>(5, MessageQueue.ConsumeAck)
-		.Register<Ring>(6, (_,_) => { });
-	}
-
-	private static void ThrowIfAlreadyInitialized()
-	{
-		if (Instance is not null)
-		{
-			throw new InvalidOperationException("Network singleton is already initialized");
-		}
-	}
-
-	internal static Network ConstructHost()
-	{
-		return new Network()
-		{
-			IsHost = true,
-			MyId = 0
-		};
-	}
-
-	internal static Network ConstructClient()
-	{
-		return new Network()
-		{
-			IsHost = false,
-		};
-	}
-
-	//TODO: have message registration be done at construction time
-
-	/// <summary>
-	/// Constructs <see cref="Instance"/> as a host
-	/// </summary>
-	public static void InitializeHost()
-	{
-		ThrowIfAlreadyInitialized();
-		Instance = ConstructHost();
-	}
-
-	/// <summary>
-	/// Constructs <see cref="Instance"/> as a client
-	/// </summary>
-	public static void InitializeClient()
-	{
-		ThrowIfAlreadyInitialized();
-		Instance = ConstructClient();
-	}
-
-	/// <summary>
-	/// Freezes the internal message registry to optimize lookups
-	/// </summary>
-	/// <remarks>
-	/// Subsequent calls to <see cref="Network.Register{T}(ushort, MessageHandler{T})"/> will fail
-	/// </remarks>
-	public void FinishSetup()
-	{
-		MessageRegistry.Freeze();
+		IsHost = isHost;
+		if (IsHost) MyId = 0;
 	}
 
 	/// <summary>
@@ -192,7 +98,7 @@ public sealed class Network : IDisposable
 	/// <param name="punchTimeout">The time in seconds for how long to wait for connection with the remote after <paramref name="remote"/> yields a value</param>
 	/// <returns>The <see cref="UdpPeerSocket"/> representing the remote peer</returns>
 	/// <exception cref="TimeoutException"></exception>
-	private async Task<UdpPeerSocket> Uplink(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout)
+	private async Task<UdpPeerSocket> Uplink(Action<IPEndpointMapping> local, Task<IPEndPoint> remote, float punchTimeout)
 	{
 		if (SynchronizationContext.Current is SynchronizationContext syncCtx)
 		{
@@ -202,7 +108,7 @@ public sealed class Network : IDisposable
 		UdpPeerSocket socket = new();
 		socket.BindRange(10600, 10799);
 		IPEndPoint stun = await socket.STUN().ConfigureAwait(false);
-		local(stun);
+		local(new(socket.LocalEndPoint, stun));
 		var remoteEP = await remote.ConfigureAwait(false);
 		socket.SetRemote(remoteEP);
 
@@ -210,35 +116,48 @@ public sealed class Network : IDisposable
 
 		int ack_seq = 0;
 
-		//TODO: have the timer halve the current value
-
 		byte[] GetProbe()
 		{
 			return MessageRegistry.Marshal(new Packet { Sequence = -1, IsReliable = false, Messages = [new Ring(ack_seq + 1)] });
 		}
 
 		using CancellationTokenSource cts = new();
+		DateTime cancelLastSet = DateTime.UtcNow;
+		TimeSpan remainingTime = TimeSpan.FromSeconds(punchTimeout);
 
 		void TempMessageHandler(ArraySegment<byte> data)
 		{
-			Trace.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port} : {data.Count}/[{string.Join(" ", data.Select(b => b.ToString("X2")))}] {ack_seq}");
 			Packet packet = MessageRegistry.Digest(data);
 
 			if (packet is not { Sequence: -1, IsReliable: false, Messages: [Ring ring] })
 				cts.Cancel(); // other side is done
 			else
 			{
+				if (ack_seq >= ring.Sequence) return;
+
 				ack_seq = ring.Sequence;
 
-				double remaining = punchTimeout / Math.Pow(2, ack_seq);
-				Trace.WriteLine(remaining);
-				if (remaining > 0.5)
-					cts.CancelAfter(TimeSpan.FromSeconds(remaining));
+				TimeSpan delta = DateTime.UtcNow - cancelLastSet;
+				cancelLastSet = DateTime.UtcNow;
+				remainingTime -= delta;
+				remainingTime *= 0.8;
+
+				Trace.WriteLine($"{socket.RemoteEndPoint.Port} -> {socket.LocalEndPoint.Port}");
+				Trace.Indent();
+				Trace.WriteLine($"{ack_seq} | {remainingTime:ss\\.fff} remaining");
+				Trace.Unindent();
+
+				if (cts.IsCancellationRequested) return;
+
+				if (remainingTime < TimeSpan.Zero)
+					cts.Cancel();
+				else
+					cts.CancelAfter(remainingTime);
 			}
 		}
 
 		socket.OnFrameReceived += TempMessageHandler;
-		cts.CancelAfter(TimeSpan.FromSeconds(punchTimeout));
+		cts.CancelAfter(remainingTime);
 
 		Task polling = socket.StartPolling();
 		await socket.HolePunch(GetProbe, cts.Token).ConfigureAwait(false);
@@ -262,15 +181,15 @@ public sealed class Network : IDisposable
 	/// <returns>The admitted client</returns>
 	/// <exception cref="InvalidOperationException" />
 	/// <exception cref="TimeoutException" />
-	public async Task<Peer> Admit(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
+	public async Task<Peer> Admit(Action<IPEndpointMapping> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotHost();
 
 		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout).ConfigureAwait(false);
 
 		SocketPeer peer = new(++h_peerSequence, socket, socket.RemoteEndPoint);
-		peers.Add(peer);
 		MessageQueue.Subscribe(peer);
+		peers.Add(peer);
 
 		SendTo<SetId>(peer, new(peer.Id), reliable: true);
 		SendTo<AddPeers>(peer, new(peers.Except([peer])), reliable: true);
@@ -288,22 +207,25 @@ public sealed class Network : IDisposable
 	/// <returns>The admitted client</returns>
 	/// <exception cref="InvalidOperationException" />
 	/// <exception cref="TimeoutException" />
-	public async Task<Peer> Join(Action<IPEndPoint> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
+	public async Task<Peer> Join(Action<IPEndpointMapping> local, Task<IPEndPoint> remote, float punchTimeout = 30f)
 	{
 		ThrowIfNotClient();
 
 		UdpPeerSocket socket = await Uplink(local, remote, punchTimeout).ConfigureAwait(false);
 
 		SocketPeer peer = new(0, socket, socket.RemoteEndPoint);
-		peers.Add(peer);
 		c_host = peer;
 		MessageQueue.Subscribe(c_host);
+		peers.Add(peer);
 
 		Send<Ping>(new());
 
 		return peer;
 	}
 
+	/// <summary>
+	/// Handles one frame of incoming and outogoing messages
+	/// </summary>
 	public void Update()
 	{
 		MessageQueue.ProcessFrame();
@@ -331,6 +253,9 @@ public sealed class Network : IDisposable
 		peer.Dispose();
 	}
 
+	/// <summary>
+	/// Stops messaging to all peers without disposing the instance
+	/// </summary>
 	public void Disconnect()
 	{
 		if (IsHost)
@@ -347,11 +272,6 @@ public sealed class Network : IDisposable
 			Send<RemovePeers>(new(new Peer((ushort)MyId!)), true);
 			CloseSocket(c_host);
 		}
-	}
-
-	public void Register<T>(NetKey key, MessageHandler<T> rpc) where T : class, IMessage
-	{
-		MessageRegistry.Register<T>(key, rpc);
 	}
 
 	/// <summary>
@@ -374,20 +294,20 @@ public sealed class Network : IDisposable
 			{
 				MessageQueue.Trigger(p, message, reliable);
 			}
-		} else
+		} else if (c_host is not null)
 		{
 			MessageQueue.Trigger(c_host!, message, reliable);
+		} else
+		{
+			Trace.WriteLine("Send failed; Host is null");
 		}
 	}
 
 	/// <summary>
 	/// Sends <paramref name="message"/> to <paramref name="peer"/>
 	/// </summary>
-	/// <remarks>Only valid for a host</remarks>
-	/// <exception cref="InvalidOperationException" />
 	public void SendTo<T>(Peer peer, T message, bool reliable = false) where T : class, IMessage
 	{
-		ThrowIfNotHost();
 		MessageQueue.Trigger(peer!, message, reliable);
 	}
 
@@ -411,8 +331,6 @@ public sealed class Network : IDisposable
 	{
 		peers.OfType<SocketPeer>().Select(p => p.Socket).ToList().ForEach(p => p.Dispose());
 		peers.Clear();
-
-		Instance = null;
 	}
 
 	/// <summary>

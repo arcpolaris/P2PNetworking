@@ -1,117 +1,46 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 
 namespace NetModel;
 
-internal partial class MessagePump(MessageRegistry registry)
+internal class MessagePump(Network network)
 {
-	private Dictionary<NetKey, PeerInfo> infos = [];
-	private MessageRegistry registry = registry;
-
-	public void ProcessFrame()
-	{
-		foreach (PeerInfo info in infos.Values)
-		{
-			var packets = info.JitterBuffer.Consume();
-			foreach (Packet packet in packets)
-			{
-				if (packet.IsReliable)
-				{
-					info.AckTracker.Acknowledge(packet);
-				}
-				foreach (IMessage message in packet.Messages)
-				{
-					Dispatch(info.Peer, message);
-				}
-			}
-		}
-	}
+	private Network network = network;
+	private Dictionary<NetKey, MessageLink> links = [];
 
 	public void Subscribe(SocketPeer peer)
 	{
-		infos.Add(peer.Id, new(peer));
-		peer.Socket.OnFrameReceived += data => SocketCallback(peer, data);
+		links.Add(peer.Id, MessageLink.StartAround(network, peer));
 	}
 
 	public void Remove(SocketPeer peer)
 	{
-		infos.Remove(peer.Id);
+		links.Remove(peer.Id);
 	}
 
-	private void SocketCallback(Peer peer, ArraySegment<byte> data)
+	public void ProcessFrame()
 	{
-		Packet packet = registry.Digest(data);
-		// if Sequence got this high naturally i don't care
-		if (packet is null or { Sequence: -1}) return;
-		infos[peer.Id].JitterBuffer.Add(packet);
-
-		Trace.WriteLine($"Packet {packet.Sequence} From {peer.Id} | {(packet.IsReliable ? "Reliable" : "Unreliable")}", "packet");
-		Trace.Indent();
-		foreach (var msg in packet.Messages.Select(m => m.GetType().ToString()))
-			Trace.WriteLine(msg, "packet");
-		Trace.Unindent();
+		foreach (MessageLink link in links.Values)
+			link.ProcessFrame();
 	}
 
 	public void SendFrame()
 	{
-		foreach (PeerInfo info in infos.Values)
-		{
-			info.AdvanceSequence();
-
-			if (DateTime.UtcNow.Subtract(info.LastPing) >= TimeSpan.FromSeconds(0.1))
-			{
-				Trigger(info.Peer, new Ping());
-				info.LastPing = DateTime.UtcNow;
-			}
-
-			if (info.OutboundReliable.Messages.Count > 0)
-			{
-				byte[] outboundReliable = registry.Marshal(info.OutboundReliable);
-				info.Peer.Socket.Send(outboundReliable);
-
-				info.AckTracker.AddPending(info.OutboundReliable);
-
-				info.OutboundReliable = new Packet { IsReliable = true };
-			}
-
-			if (info.AckTracker.GenAck(info.Sequence, out var ack))
-			{
-				Trigger(info.Peer, ack);
-			}
-
-			if (info.Outbound.Messages.Count > 0)
-			{
-				byte[] outbound = registry.Marshal(info.Outbound);
-				info.Peer.Socket.Send(outbound);
-
-				info.Outbound = new Packet() { IsReliable = false };
-			}
-
-			foreach (var packet in info.AckTracker.FlushResends(info.Sequence))
-			{
-				info.Sequence++;
-
-				byte[] digest = registry.Marshal(packet);
-				info.Peer.Socket.Send(digest);
-				info.AckTracker.AddPending(packet);
-			}
-		}
+		foreach (MessageLink link in links.Values)
+			link.SendFrame();
 	}
 
-	internal void Trigger<T>(Peer target, T message, bool reliable = false) where T : class, IMessage
+	public void Trigger<T>(Peer target, T message, bool reliable = false) where T : class, IMessage
 	{
+		if (target is null) throw new ArgumentNullException(nameof(target));
 		if (target is not SocketPeer) throw new ArgumentException("Cannot invoke on indirect remote peer");
-		PeerInfo info = infos[target.Id];
-		Packet outbound = reliable ? info.OutboundReliable : info.Outbound;
-		outbound.Messages.Add(message);
+		if (!links.TryGetValue(target.Id, out MessageLink link))
+			throw new KeyNotFoundException($"Cannot access data for Peer {target.Id}");
+		link.AddMessage(message, reliable);
 	}
 
-	private void Dispatch(Peer from, IMessage message)
+	public void ConsumeAck(Peer sender, Acknowledgement ack)
 	{
-		NetKey key = registry.Lookup(message.GetType());
-		var rpc = registry.GetRpc(key);
-		rpc.Invoke(from, message);
+		links[sender.Id].ConsumeAck(ack);
 	}
 }

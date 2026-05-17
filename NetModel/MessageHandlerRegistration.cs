@@ -18,12 +18,13 @@ internal class MessageHandlerRegistration<T>(MessageHandler<T> handler) : IMessa
 	/// <summary>
 	/// <inheritdoc/>
 	/// </summary>
+	/// <param name="network"></param>
 	/// <param name="sender"></param>
 	/// <param name="message"></param>
 	/// <exception cref="ArgumentException"></exception>
-	public void Invoke(Peer sender, object message)
+	public void Invoke(Network network, Peer sender, object message)
 	{
 		if (message is not T cast) throw new ArgumentException($"Message was not of type {typeof(T)}", nameof(message));
-		Handler.Invoke(sender, cast);
+		Handler.Invoke(network, sender, cast);
 	}
 }

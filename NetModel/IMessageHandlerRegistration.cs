@@ -14,7 +14,8 @@ internal interface IMessageHandlerRegistration
 	/// <summary>
 	/// Invokes the bound <see cref="MessageHandler{T}"/>
 	/// </summary>
+	/// <param name="network">Instance which is handling the message</param>
 	/// <param name="sender">Remote sender of the message</param>
 	/// <param name="message">Message should be of Type <see cref="Type"/></param>
-	void Invoke(Peer sender, object message);
+	void Invoke(Network network, Peer sender, object message);
 }

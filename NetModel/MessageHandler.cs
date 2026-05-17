@@ -11,4 +11,4 @@
 ///	As such, handlers should be both idempotent and order-invarient
 /// </para>
 /// </remarks>
-public delegate void MessageHandler<T>(Peer sender, T message) where T : class, IMessage;
+public delegate void MessageHandler<T>(Network network, Peer sender, T message) where T : class, IMessage;

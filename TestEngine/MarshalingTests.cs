@@ -8,13 +8,13 @@ public sealed class MarshalingTests
 	[TestMethod]
 	public void MessageRegistry_MarshalDigest_RoundTripsMixedPacket()
 	{
-		MessageRegistry registry = new();
+		MessageRegistry registry = new([]);
 
 		registry
-			.Register<TestMessage>(100, (_, _) => { })
-			.Register<OrderedMessage>(101, (_, _) => { })
-			.Register<SetId>(102, (_, _) => { })
-			.Register<AddPeers>(103, (_, _) => { });
+			.Register<TestMessage>(100, (_, _, _) => { })
+			.Register<OrderedMessage>(101, (_, _, _) => { })
+			.Register<SetId>(102, (_, _, _) => { })
+			.Register<AddPeers>(103, (_, _, _) => { });
 
 		registry.Freeze();
 

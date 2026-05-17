@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -145,18 +146,6 @@ internal class UdpPeerSocket : IDisposable
 
 		await _socket.SendToAsync(sendBuffer, SocketFlags.None, stunEP).ConfigureAwait(false);
 
-		//int read = await Task.Run(() =>
-		//{
-		//	var oldTimeout = _socket.ReceiveTimeout;
-		//	var oldBlocking = _socket.Blocking;
-		//	_socket.Blocking = true;
-		//	_socket.ReceiveTimeout = 5000;
-		//	int read = _socket.Receive(recBuffer);
-		//	_socket.Blocking = oldBlocking;
-		//	_socket.ReceiveTimeout = oldTimeout;
-		//	return read;
-		//});
-
 		int read;
 		try
 		{
@@ -186,8 +175,6 @@ internal class UdpPeerSocket : IDisposable
 		uint address = reader.ReadUInt32();
 
 		byte[] addressBytes = BitConverter.GetBytes(address);
-
-
 
 		return new IPEndPoint(new IPAddress(addressBytes), (port));
 	}

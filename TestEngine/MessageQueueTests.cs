@@ -1,4 +1,5 @@
-﻿using NetModel;
+﻿using System.Net;
+using NetModel;
 
 namespace TestEngine;
 
@@ -13,16 +14,16 @@ public sealed class MessageQueueTests
 		TestMessage? received = null;
 		Peer? sender = null;
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
+		var pair = await harness.CreateNetworkPairAsync(builder =>
 		{
-			net.Register<TestMessage>(100, (from, msg) =>
+			builder.Register<TestMessage>(100, (_, from, msg) =>
 			{
 				sender = from;
 				received = msg;
 			});
 		});
 
-		pair.Host.SendTo(pair.Host.Peers[0], new TestMessage { Text = "hello", Number = 7 });
+		pair.Host.SendTo(pair.Host.Peers.First(), new TestMessage { Text = "hello", Number = 7 });
 
 		await LoopbackHarness.EventuallyAsync(
 			condition: () => received is not null,
@@ -42,11 +43,11 @@ public sealed class MessageQueueTests
 
 		List<TestMessage> deliveries = [];
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
-			net.Register<TestMessage>(100, (_, msg) => deliveries.Add(msg)));
+		var pair = await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<TestMessage>(100, (_, _, msg) => deliveries.Add(msg)));
 
 		pair.Host.SendTo(
-			pair.Host.Peers[0],
+			pair.Host.Peers.First(),
 			new TestMessage { Text = "reliable", Number = 1 },
 			reliable: true);
 
@@ -68,10 +69,10 @@ public sealed class MessageQueueTests
 
 		List<string> deliveries = [];
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
-			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
+		var pair = await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<OrderedMessage>(101, (_, _, msg) => deliveries.Add(msg.Label)));
 
-		Peer clientPeer = pair.Host.Peers[0];
+		Peer clientPeer = pair.Host.Peers.First();
 
 		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "first" });
 		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "second" });
@@ -93,10 +94,10 @@ public sealed class MessageQueueTests
 
 		List<string> deliveries = [];
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
-			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
+		var pair = await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<OrderedMessage>(101, (_, _, msg) => deliveries.Add(msg.Label)));
 
-		Peer clientPeer = pair.Host.Peers[0];
+		Peer clientPeer = pair.Host.Peers.First();
 
 		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "unreliable" }, reliable: false);
 		pair.Host.SendTo(clientPeer, new OrderedMessage { Label = "reliable" }, reliable: true);
@@ -117,8 +118,8 @@ public sealed class MessageQueueTests
 
 		int deliveries = 0;
 
-		await harness.CreateNetworkPairAsync(net =>
-			net.Register<TestMessage>(100, (_, _) => deliveries++));
+		await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<TestMessage>(100, (_, _, _) => deliveries++));
 
 		for (int i = 0; i < 5; i++)
 		{
@@ -137,8 +138,8 @@ public sealed class MessageQueueTests
 		List<string> hostSeen = [];
 		List<string> clientSeen = [];
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
-			net.Register<OrderedMessage>(101, (from, msg) =>
+		var pair = await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<OrderedMessage>(101, (_, from, msg) =>
 			{
 				if (from.Id == 0)
 					clientSeen.Add(msg.Label);
@@ -146,7 +147,7 @@ public sealed class MessageQueueTests
 					hostSeen.Add(msg.Label);
 			}));
 
-		pair.Host.SendTo(pair.Host.Peers[0], new OrderedMessage { Label = "H->C" });
+		pair.Host.SendTo(pair.Host.Peers.First(), new OrderedMessage { Label = "H->C" });
 		pair.Client.Send(new OrderedMessage { Label = "C->H" });
 
 		await LoopbackHarness.EventuallyAsync(
@@ -164,10 +165,10 @@ public sealed class MessageQueueTests
 
 		List<string> deliveries = [];
 
-		var pair = await harness.CreateNetworkPairAsync(net =>
-			net.Register<OrderedMessage>(101, (_, msg) => deliveries.Add(msg.Label)));
+		var pair = await harness.CreateNetworkPairAsync(builder =>
+			builder.Register<OrderedMessage>(101, (_, _, msg) => deliveries.Add(msg.Label)));
 
-		Peer clientPeer = pair.Host.Peers[0];
+		Peer clientPeer = pair.Host.Peers.First();
 
 		for (int i = 0; i < 6; i++)
 		{
@@ -181,5 +182,41 @@ public sealed class MessageQueueTests
 		CollectionAssert.AreEqual(
 			new[] { "m0", "m1", "m2", "m3", "m4", "m5" },
 			deliveries);
+	}
+
+	[TestMethod]
+	public async Task Reliable_Id_AssignedAfterDropped()
+	{
+		Network host = Network.CreateBuilder().Build(true);
+		Network client = Network.CreateBuilder().Build(false);
+
+		TaskCompletionSource<IPEndPoint> hostEndpoint =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		TaskCompletionSource<IPEndPoint> clientEndpoint =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		Task<Peer> admitTask = host.Admit(
+			local: map => hostEndpoint.SetResult(map.Wan),
+			remote: clientEndpoint.Task,
+			punchTimeout: 3f);
+
+		Task<Peer> joinTask = client.Join(
+			local: map => clientEndpoint.SetResult(map.Wan),
+			remote: hostEndpoint.Task,
+			punchTimeout: 20f);
+
+		await LoopbackHarness.EventuallyAsync(
+			() =>
+			{
+				if (client.Host is null) return false;
+				if (client.Host.Id != 0) return false;
+				if (host.MyId != 0) return false;
+				if (host.Peers.Count != 1) return false;
+				if (client.MyId != host.Peers.First().Id) return false;
+				return true;
+			},
+			() => { host.Update(); client.Update(); },
+			60_000
+		);
 	}
 }

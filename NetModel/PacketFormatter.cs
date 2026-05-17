@@ -58,7 +58,6 @@ internal sealed class PacketFormatter(MessageRegistry lookup) : IMessagePackForm
 			NetKey key = reader.ReadUInt16();
 			Type type = Lookup.Lookup(key);
 			IMessage message = (IMessage)MessagePackSerializer.Deserialize(type, ref reader, options)!;
-			if (message is Acknowledgement ack) ack.Sequence = packet.Sequence;
 			packet.Messages.Add(message);
 		}
 

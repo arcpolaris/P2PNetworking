@@ -18,25 +18,28 @@ internal static class Program
 
 	static CancellationTokenSource? pollingCts = null;
 
+	static Network? network;
+
 	static async Task<int> Main(string[] args)
 	{
 		Trace.Listeners.Add(new ConsoleTraceListener());
 		return await BuildRoot().Parse(args).InvokeAsync();
 	}
 
-	static void Setup()
+	static void Setup(bool asHost)
 	{
-		Network.Instance!.Register<TextMessage>(100, (sender, text) =>
-		{
-			Console.WriteLine("[{0}]: {1}", sender.Id, text.Text);
+		network = Network.CreateBuilder()
+		.Register<TextMessage>(100,
+			static (_, sender, text) => Console.WriteLine("[{0}]: {1}", sender.Id, text.Text),
+			static (net, sender, text) =>
+			{
+				Console.WriteLine("[{0}]: {1}", sender.Id, text.Text);
 
-			if (Network.Instance.IsHost) Network.Instance.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
-		});
-		Network.Instance.Register<IndirectTextMessage>(101, (sender, indicrect) =>
-		{
-			Console.WriteLine("[{0}]: {1}", indicrect.From, indicrect.Text);
-		});
-		Network.Instance.FinishSetup();
+				net.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
+			}
+		).Register<IndirectTextMessage>(101,
+			static (_, sender, indicrect) => Console.WriteLine("[{0}]: {1}", indicrect.From, indicrect.Text)
+		).Build(asHost);
 
 		pollingCts?.Dispose();
 		pollingCts = new();
@@ -44,7 +47,7 @@ internal static class Program
 		{
 			while (!pollingCts.Token.IsCancellationRequested)
 			{
-				Network.Instance?.Update();
+				network.Update();
 				await Task.Delay(20);
 			}
 		});
@@ -77,7 +80,7 @@ internal static class Program
 			exit_cmd.SetAction(_ =>
 			{
 				running = false;
-				Network.Instance?.Dispose();
+				network?.Dispose();
 			});
 			root_cmd.Add(exit_cmd);
 
@@ -85,11 +88,11 @@ internal static class Program
 			root_cmd.Add(start_cmd);
 
 			Command start_host_cmd = new("host", "Start Network as host");
-			start_host_cmd.SetAction(_ => { Network.InitializeHost(); Setup(); });
+			start_host_cmd.SetAction(_ => Setup(asHost: true));
 			start_cmd.Add(start_host_cmd);
 
 			Command start_cmdlient_cmd = new("client", "Start Network as client");
-			start_cmdlient_cmd.SetAction(_ => { Network.InitializeClient(); Setup();});
+			start_cmdlient_cmd.SetAction(_ => Setup(asHost: false));
 			start_cmd.Add(start_cmdlient_cmd);
 
 			Command admit_cmd = new("admit", "Admit a client to your chatroom")
@@ -101,7 +104,7 @@ internal static class Program
 				float timeout = (float)parsed.GetValue(timeout_opt);
 				if (timeout < 0) timeout = 30;
 
-				Peer peer = await Network.Instance!.Admit(local: ep =>
+				Peer peer = await network!.Admit(local: ep =>
 				{
 					Console.WriteLine("Admitting on {0}\n", ep);
 				}, remote: Task.Run(async () =>
@@ -127,7 +130,7 @@ internal static class Program
 				float timeout = (float)parsed.GetValue(timeout_opt);
 				if (timeout < 0) timeout = 30;
 
-				await Network.Instance!.Join(local: ep =>
+				await network!.Join(local: ep =>
 				{
 					Console.WriteLine("Waiting on {0}", ep);
 				}, remote: Task.Run(async () =>
@@ -157,7 +160,7 @@ internal static class Program
 			broadcast_cmd.SetAction(parsed =>
 			{
 				string message = parsed.GetRequiredValue(message_arg);
-				Network.Instance!.Send<TextMessage>(new(message));
+				network!.Send<TextMessage>(new(message));
 			});
 			root_cmd.Add(broadcast_cmd);
 		}

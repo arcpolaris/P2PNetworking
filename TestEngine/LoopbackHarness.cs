@@ -36,17 +36,18 @@ internal sealed class LoopbackHarness : IDisposable
 	}
 
 	public async Task<ConnectedNetworkPair> CreateNetworkPairAsync(
-		Action<Network>? configure,
+		Action<Network.Builder>? configure,
 		float punchTimeout = 15f)
 	{
-		Network host = Network.ConstructHost();
-		Network client = Network.ConstructClient();
+		var hostBuilder = Network.CreateBuilder();
+		var clientBuilder = Network.CreateBuilder();
 
-		configure?.Invoke(host);
-		configure?.Invoke(client);
+		configure?.Invoke(hostBuilder);
+		configure?.Invoke(clientBuilder);
 
-		host.FinishSetup();
-		client.FinishSetup();
+		var host = hostBuilder.Build(asHost: true);
+		var client = clientBuilder.Build(asHost: false);
+		
 
 		networks.Add(host);
 		networks.Add(client);
@@ -56,8 +57,8 @@ internal sealed class LoopbackHarness : IDisposable
 		await EventuallyAsync(
 			condition: () =>
 			{
-				Debug.WriteLine($"{client.MyId} <> {pair.Host.Peers[0].Id}");
-				return client.MyId == pair.Host.Peers[0].Id;
+				Debug.WriteLine($"{client.MyId} <> {pair.Host.Peers.First().Id}");
+				return client.MyId == pair.Host.Peers.First().Id;
 			},
 			pump: Pump,
 			timeoutMs: 4000,
@@ -68,12 +69,12 @@ internal sealed class LoopbackHarness : IDisposable
 
 	public async Task<MultiClientNetwork> CreateMultiClientNetworkAsync(
 		int clientCount,
-		Action<Network>? configure = null,
+		Action<Network.Builder>? configure = null,
 		float punchTimeout = 3f)
 	{
-		Network host = Network.ConstructHost();
-		configure?.Invoke(host);
-		host.FinishSetup();
+		var hostBuilder = Network.CreateBuilder();
+		configure?.Invoke(hostBuilder);
+		var host = hostBuilder.Build(asHost: true);
 
 		networks.Add(host);
 
@@ -81,9 +82,9 @@ internal sealed class LoopbackHarness : IDisposable
 
 		for (int i = 0; i < clientCount; i++)
 		{
-			Network client = Network.ConstructClient();
-			configure?.Invoke(client);
-			client.FinishSetup();
+			var clientBuilder = Network.CreateBuilder();
+			configure?.Invoke(clientBuilder);
+			var client = clientBuilder.Build(asHost: false);
 
 			networks.Add(client);
 
@@ -120,12 +121,12 @@ internal sealed class LoopbackHarness : IDisposable
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		Task<Peer> admitTask = host.Admit(
-			local: hostEndpoint.SetResult,
+			local: map => hostEndpoint.SetResult(map.Wan),
 			remote: clientEndpoint.Task,
 			punchTimeout: punchTimeout);
 
 		Task<Peer> joinTask = client.Join(
-			local: clientEndpoint.SetResult,
+			local: map => clientEndpoint.SetResult(map.Wan),
 			remote: hostEndpoint.Task,
 			punchTimeout: punchTimeout);
 
