@@ -75,6 +75,8 @@ internal class JitterBuffer
 	/// </returns>
 	public List<Packet> Consume()
 	{
+		Trace.WriteLine(queue.Count, "queue count jitter");
+		Trace.WriteLine(buffer.Count, "buffer count jitter");
 		Drain();
 
 		var res = buffer.TakeWhile(p => p.IsReliable).ToList();

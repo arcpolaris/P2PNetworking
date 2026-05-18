@@ -38,7 +38,6 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.44657826, g: 0.49641263, b: 0.57481676, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -181,8 +180,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b6cf6cd86e0ad5c4ab25ae707f3a1744, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  uplinkOnStart: 1
   startAsHost: 1
   remoteEP: 127.0.0.1:10601
+  Objects:
+    _serializedList: []
+  Prefabs:
+    _serializedList: []
 --- !u!1 &292522279
 GameObject:
   m_ObjectHideFlags: 0
@@ -770,6 +774,14 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1915003908775411143, guid: cf4d37edef137fe419322fef8e5599ce, type: 3}
+      propertyPath: guid
+      value: 9fdf5d3f-4a9a-44b6-b0c9-275cf680ddce
+      objectReference: {fileID: 0}
+    - target: {fileID: 1915003908775411143, guid: cf4d37edef137fe419322fef8e5599ce, type: 3}
+      propertyPath: PawnPrefab
+      value: 
+      objectReference: {fileID: 1915003908775411143, guid: cf4d37edef137fe419322fef8e5599ce, type: 3}
     - target: {fileID: 2415741012986125684, guid: cf4d37edef137fe419322fef8e5599ce, type: 3}
       propertyPath: m_Name
       value: Player

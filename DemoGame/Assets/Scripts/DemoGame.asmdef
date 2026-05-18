@@ -1,0 +1,20 @@
+{
+    "name": "DemoGame",
+    "rootNamespace": "",
+    "references": [
+        "com.arcpolaris.netmodel",
+        "MessagePack",
+        "MessagePack.Unity",
+        "ParrelSync",
+        "AYellowpaper.SerializedCollections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

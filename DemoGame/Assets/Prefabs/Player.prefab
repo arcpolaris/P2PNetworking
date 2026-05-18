@@ -167,6 +167,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 222dd4a0332dfca4a89f7c30973d9d3c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  guid: 729a943e-dc28-485c-88d3-8f640923c7a7
   <IsLocallyOwned>k__BackingField: 1
   PawnPrefab: {fileID: 1915003908775411143}
 --- !u!1 &3365530912056428716

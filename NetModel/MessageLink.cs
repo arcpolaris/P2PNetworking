@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -25,8 +26,8 @@ internal partial class MessageLink
 	private Network Parent { get; }
 
 	private JitterBuffer JitterBuffer { get; } = new();
-	private List<IMessage> Outbound { get; set; } = [];
-	private List<IMessage> OutboundReliable { get; set; } = [];
+	private ConcurrentQueue<IMessage> Outbound { get; set; } = [];
+	private ConcurrentQueue<IMessage> OutboundReliable { get; set; } = [];
 
 	public SocketPeer Peer { get; init; }
 
@@ -34,13 +35,14 @@ internal partial class MessageLink
 
 	public void AddMessage<T>(T message, bool reliably) where T : class, IMessage
 	{
-		List<IMessage> builder = reliably ? OutboundReliable : Outbound;
-		builder.Add(message);
+		ConcurrentQueue<IMessage> builder = reliably ? OutboundReliable : Outbound;
+		builder.Enqueue(message);
 	}
 
 	public void ProcessFrame()
 	{
 		var packets = JitterBuffer.Consume();
+		Trace.WriteLine(packets.Count, "jitter consume");
 		foreach (Packet packet in packets)
 		{
 			if (packet.IsReliable)
@@ -58,7 +60,7 @@ internal partial class MessageLink
 	{
 		if (DateTime.UtcNow.Subtract(LastPing) >= TimeSpan.FromSeconds(2))
 		{
-			Outbound.Add(new Ping());
+			Outbound.Enqueue(new Ping());
 			LastPing = DateTime.UtcNow;
 		}
 
@@ -67,9 +69,9 @@ internal partial class MessageLink
 			Packet packet = new()
 			{
 				IsReliable = true,
-				Messages = OutboundReliable
+				Messages = OutboundReliable.ToList()
 			};
-			OutboundReliable = [];
+			OutboundReliable.Clear();
 
 			Send(packet);
 		}
@@ -81,9 +83,9 @@ internal partial class MessageLink
 			Packet packet = new()
 			{
 				IsReliable = false,
-				Messages = Outbound
+				Messages = Outbound.ToList()
 			};
-			Outbound = [];
+			Outbound.Clear();
 
 			Send(packet);
 		}
@@ -107,21 +109,22 @@ internal partial class MessageLink
 		{
 			AddPending(packet);
 		}
+
+		Trace.WriteLine($"{packet} - {string.Join(' ', digest.Select(b => b.ToString("X2")))}", "sent");
+		Packet debug = Parent.MessageRegistry.Digest(digest);
+		Trace.Assert(packet.Sequence == debug.Sequence, "Sequences do not match");
+		Trace.Assert(packet.IsReliable == debug.IsReliable, "Reliability does not match");
+		Trace.Assert(packet.Messages.Select(msg => msg.GetType().FullName).SequenceEqual(debug.Messages.Select(msg => msg.GetType().FullName)));
 	}
 
 
 	private void SocketCallback(ArraySegment<byte> data)
 	{
+		Trace.WriteLine("recv raw");
 		Packet packet = Parent.MessageRegistry.Digest(data);
+		Trace.WriteLine(packet, "recv");
 		// if Sequence got this high naturally i don't care
 		if (packet is null or { Sequence: -1 }) return;
-
-		Trace.WriteLine($"Packet {packet.Sequence} From {Peer.Id} | {(packet.IsReliable ? "Reliable" : "Unreliable")}", "packet");
-		Trace.Indent();
-		foreach (var msg in packet.Messages.Select(m => m.GetType().ToString()))
-			Trace.WriteLine(msg, "packet");
-
-		Trace.Unindent();
 
 		JitterBuffer.Add(packet);
 	}

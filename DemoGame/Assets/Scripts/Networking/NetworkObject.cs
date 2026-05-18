@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using MessagePack;
 using NetModel;
 using UnityEngine;
@@ -7,7 +8,10 @@ namespace DemoGame.Networking
 {
     public class NetworkObject : MonoBehaviour
     {
-        public Guid Guid { get; private set; } = new();
+		[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+		static void ResetStatics() => injected = false;
+
+		public string guid = Guid.NewGuid().ToString();
 
         private static bool injected;
 
@@ -26,17 +30,17 @@ namespace DemoGame.Networking
 
         public NetworkObject PawnPrefab;
 
+        bool IsPrefab => PawnPrefab == this;
+
         void Awake()
         {
-            if (Guid == Guid.Empty)
-                Guid = Guid.NewGuid();
+            if (!IsPrefab)
+                guid = Guid.NewGuid().ToString();
 
             NetworkManager.Instance
                 .Prefabs
-                .TryAdd(
-                PawnPrefab.Guid, 
-                PawnPrefab);
-
+                .TryAdd(PawnPrefab.guid, PawnPrefab);
+            UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
             if (!injected)
             {
                 injected = true;
@@ -57,9 +61,10 @@ namespace DemoGame.Networking
                         if (NetworkManager.Instance.Objects.ContainsKey(makePawn.Id)) return;
 
                         NetworkObject prefab = NetworkManager.Instance.Prefabs[makePawn.Prefab];
-                        NetworkObject instance = Instantiate(prefab, makePawn.Position, makePawn.Rotation);
+						UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
+						NetworkObject instance = Instantiate(prefab, makePawn.Position, makePawn.Rotation);
                         instance.PawnPrefab = prefab;
-                        instance.Guid = makePawn.Id;
+                        instance.guid = makePawn.Id;
                         instance.IsLocallyOwned = false;
                         instance.ownerId = makePawn.Owner;
                         instance.BroadcastMessage("AwakePawn");
@@ -70,10 +75,11 @@ namespace DemoGame.Networking
 
         void Start()
         {
-            NetworkManager.Instance.Objects.Add(Guid, this);
-        }
+            NetworkManager.Instance.Objects.Add(guid, this);
+			UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
+		}
 
-        void Update()
+		void Update()
         {
             if (!IsLocallyOwned) return;
             if (NetworkManager.Instance.Network.Peers.Count == 0) return;
@@ -83,18 +89,18 @@ namespace DemoGame.Networking
         }
     }
 
-    [MessagePackObject(AllowPrivate = true)]
+    [MessagePackObject]
     public partial class SetTransform : IMessage
     {
         [Key(0)]
-        public Guid Id { get; private set; }
+        public string Id { get; private set; }
         [Key(1)]
         public Vector3 Position { get; private set; }
         [Key(2)]
         public Quaternion Rotation { get; private set; }
 
         [SerializationConstructor]
-        private SetTransform(Guid id, Vector3 position, Quaternion rotation)
+        public SetTransform(string id, Vector3 position, Quaternion rotation)
         {
             Id = id;
             Position = position;
@@ -103,7 +109,7 @@ namespace DemoGame.Networking
 
         public SetTransform(NetworkObject t)
         {
-            Id = t.Guid;
+            Id = t.guid;
             t.transform.GetLocalPositionAndRotation(out var pos, out var rot);
             Position = pos;
             Rotation = rot;
@@ -112,28 +118,32 @@ namespace DemoGame.Networking
 		public void Apply(Transform t) => t.SetLocalPositionAndRotation(Position, Rotation);
 	}
 
-    [MessagePackObject(AllowPrivate = true)]
+    [MessagePackObject]
     public partial class MakePawn : IMessage
     {
         [Key(0)] public ushort Owner { get; private set; }
-        [Key(1)] public Guid Id { get; private set;}
-        [Key(2)] public Guid Prefab { get; private set; }
+        [Key(1)] public string Id { get; private set;}
+        [Key(2)] public string Prefab { get; private set; }
         [Key(3)] public Vector3 Position { get; private set; }
         [Key(4)] public Quaternion Rotation { get; private set; }
 
         public MakePawn(NetworkObject obj)
         {
-            Owner = (ushort)NetworkManager.Instance.Network.MyId;
-            Id = obj.Guid;
-            Prefab = obj.PawnPrefab.Guid;
+            Owner = (ushort)(NetworkManager.Instance.Network.MyId ?? 255u);
+            Id = obj.guid;
+            Prefab = obj.PawnPrefab.guid;
+            Position = obj.gameObject.transform.localPosition;
+            Rotation = obj.gameObject.transform.localRotation;
         }
 
         [SerializationConstructor]
-		public MakePawn(ushort owner, Guid id, Guid prefab)
+		public MakePawn(ushort owner, string id, string prefab, Vector3 position, Quaternion rotation)
 		{
 			Owner = owner;
 			Id = id;
 			Prefab = prefab;
+            Position = position;
+            Rotation = rotation;
 		}
 	}
 }

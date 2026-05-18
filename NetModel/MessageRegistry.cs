@@ -25,6 +25,7 @@ internal class MessageRegistry
 			],
 			[
 				.. extraResolvers,
+				GeneratedMessagePackResolver.Instance,
 				StandardResolver.Instance
 			]
 		);

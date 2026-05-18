@@ -59,6 +59,7 @@ internal class UdpPeerSocket : IDisposable
 
 	public void Dispose()
 	{
+		Trace.WriteLine("PeerSocket Disposed");
 		_socket.Dispose();
 		_disposed = true;
 	}
@@ -110,7 +111,7 @@ internal class UdpPeerSocket : IDisposable
 	public async Task StartPolling()
 	{
 		while (!_disposed) {
-			byte[] buffer = new byte[max_packet_size];
+			byte[] buffer = new byte[2048];
 			int read;
 			try
 			{
@@ -119,9 +120,21 @@ internal class UdpPeerSocket : IDisposable
 			catch (OperationCanceledException) { break; }
 			catch (ObjectDisposedException) { break; }
 			catch (SocketException e) when (e.SocketErrorCode is SocketError.Interrupted) { break; }
+			catch (SocketException e) when (e.SocketErrorCode is SocketError.MessageSize)
+			{
+				Trace.Fail(e.Message, $"available: {_socket.Available}");
+				throw e;
+			}
+			catch (Exception e)
+			{
+				Trace.Fail(e.Message);
+				throw e;
+			}
 			ArraySegment<byte> segment = new(buffer, 0, read);
+			Trace.WriteLine($"{OnFrameReceived?.GetInvocationList().Length ?? 0}", "handlerCount");
 			OnFrameReceived?.Invoke(segment);
 		}
+		Trace.WriteLine("Polling loop exited");
 	}
 
 	public event Action<ArraySegment<byte>>? OnFrameReceived;

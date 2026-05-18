@@ -2,59 +2,62 @@ using NetModel;
 using MessagePack;
 using UnityEngine;
 
-public sealed class ChatConsole : MonoBehaviour
+namespace DemoGame.Networking
 {
-	[SerializeField]
-	[ContextMenuItem("Send", nameof(Send))]
-	private string prompt = "";
-
-	private void Awake()
+	public sealed class ChatConsole : MonoBehaviour
 	{
-		NetworkManager.Instance.NetworkBuilder.Register<TextMessage>(100, static (net, sender, text) =>
+		[SerializeField]
+		[ContextMenuItem("Send", nameof(Send))]
+		private string prompt = "";
+
+		private void Awake()
 		{
-			print($"[{sender.Id}]: {text.Text}");
-			net.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
-		}, static (_, sender, text) => 
-			print($"[{sender.Id}]: {text.Text}")
-		).Register<IndirectTextMessage>(101, static (_, sender, indirect) =>
-			print($"[{indirect.From}]: {indirect.Text}")
-		);
+			NetworkManager.Instance.NetworkBuilder.Register<TextMessage>(100, static (net, sender, text) =>
+			{
+				print($"[{sender.Id}]: {text.Text}");
+				net.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
+			}, static (_, sender, text) =>
+				print($"[{sender.Id}]: {text.Text}")
+			).Register<IndirectTextMessage>(101, static (_, sender, indirect) =>
+				print($"[{indirect.From}]: {indirect.Text}")
+			);
+		}
+
+		void Send()
+		{
+			NetworkManager.Instance.Network.Send(new TextMessage(prompt), reliable: true);
+		}
 	}
 
-	void Send()
+	[MessagePackObject(AllowPrivate = true)]
+	public class TextMessage : IMessage
 	{
-		NetworkManager.Instance.Network.Send(new TextMessage(prompt), reliable: true);
-	}
-}
+		[Key(0)]
+		public string Text { get; set; }
 
-[MessagePackObject(AllowPrivate = true)]
-public class TextMessage : IMessage
-{
-	[Key(0)]
-	public string Text { get; set; }
-
-	public TextMessage(string text) => Text = text;
-}
-
-[MessagePackObject(AllowPrivate = true)]
-public class IndirectTextMessage : IMessage
-{
-	[Key(0)]
-	public uint From { get; set; }
-
-	[Key(1)]
-	public string Text { get; set; }
-
-	[SerializationConstructor]
-	public IndirectTextMessage(uint from, string text)
-	{
-		From = from;
-		Text = text;
+		public TextMessage(string text) => Text = text;
 	}
 
-	public IndirectTextMessage(Peer from, TextMessage text)
+	[MessagePackObject(AllowPrivate = true)]
+	public class IndirectTextMessage : IMessage
 	{
-		From = from.Id;
-		Text = text.Text;
+		[Key(0)]
+		public uint From { get; set; }
+
+		[Key(1)]
+		public string Text { get; set; }
+
+		[SerializationConstructor]
+		public IndirectTextMessage(uint from, string text)
+		{
+			From = from;
+			Text = text;
+		}
+
+		public IndirectTextMessage(Peer from, TextMessage text)
+		{
+			From = from.Id;
+			Text = text.Text;
+		}
 	}
 }

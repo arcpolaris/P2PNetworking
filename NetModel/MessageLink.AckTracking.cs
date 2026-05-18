@@ -57,7 +57,7 @@ internal partial class MessageLink
 	{
 		if (received == 0) return;
 		Acknowledgement ack = new(incoming_seq, received);
-		Outbound.Add(ack);
+		Outbound.Enqueue(ack);
 	}
 
 	private void RecordReceived(Packet packet)
