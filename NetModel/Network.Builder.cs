@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using MessagePack;
 
@@ -12,6 +12,8 @@ public sealed partial class Network
 	/// </summary>
 	public static Builder CreateBuilder() => new();
 	
+	/// <inheritdoc cref="CreateBuilder()"/>
+	/// <param name="extraResolvers">Resolvers to forward into the generated serializer</param>
 	public static Builder CreateBuilder(params IFormatterResolver[] extraResolvers) => new(extraResolvers);
 
 	/// <summary>
@@ -54,14 +56,28 @@ public sealed partial class Network
 				ThrowForHost,
 				static (net, _, addPeers) => net.peers.AddRange(addPeers.Peers));
 			Register<RemovePeers>(3,
-				ThrowForHost,
+				static (net, sender, removePeers) =>
+				{
+					if (removePeers is not { Peers: [var peer] } || peer.Id != sender.Id)
+					{
+						Trace.Fail("Clients may only send a peer removal with themself as the only element");
+						return;
+					}
+					net.SendToAllExcept(sender, removePeers, true);
+					net.CloseSocket((SocketPeer)peer);
+				},
 				static (net, _, removePeers) =>
 				{
 					if (removePeers.Peers.Any(p => p.Id == net.MyId || p.Id == 0))
+					{
 						net.CloseSocket(net.c_host!);
+						net.peers.Clear();
+					}
 					else
+					{
 						foreach (Peer peer in removePeers.Peers)
 							net.peers.Remove(peer);
+					}
 				});
 			Register<SetId>(4,
 				ThrowForHost,

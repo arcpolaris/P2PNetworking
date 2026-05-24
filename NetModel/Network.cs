@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Text;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using ObservableCollections;
@@ -107,12 +107,12 @@ public sealed partial class Network : IDisposable
 
 		UdpPeerSocket socket = new();
 		socket.BindRange(10600, 10799);
-		IPEndPoint stun = await socket.STUN().ConfigureAwait(false);
-		local(new(socket.LocalEndPoint, stun));
+		IPEndpointMapping mapping = await socket.DiscoverMapping().ConfigureAwait(false);
+		local(mapping);
 		var remoteEP = await remote.ConfigureAwait(false);
 		socket.SetRemote(remoteEP);
 
-		Trace.WriteLine($"[{socket.LocalEndPoint}]/[{stun}] Uplinking with {remoteEP}...");
+		Trace.WriteLine($"{mapping} Uplinking with {remoteEP}...");
 
 		int ack_seq = 0;
 
@@ -230,6 +230,31 @@ public sealed partial class Network : IDisposable
 	{
 		MessageQueue.ProcessFrame();
 		MessageQueue.SendFrame();
+
+		CheckTimeouts();
+	}
+
+	private void CheckTimeouts()
+	{
+		if (IsClient)
+		{
+			if (c_host is null) return;
+			if (MessageQueue.GetTimeSinceLastMessage(c_host).TotalSeconds > 10)
+			{
+				Trace.WriteLine("Closing due to timeout");
+				Disconnect();
+			}
+			return;
+		}
+		
+		foreach (var peer in peers.ToList())
+		{
+			if (MessageQueue.GetTimeSinceLastMessage(peer).TotalSeconds > 10)
+			{
+				Trace.WriteLine($"Disconnecting due to timeout: {peer.Id}");
+				Kick(peer);
+			}
+		}
 	}
 
 	/// <summary>
@@ -241,8 +266,8 @@ public sealed partial class Network : IDisposable
 	public void Kick(Peer peer)
 	{
 		ThrowIfNotHost();
-		//WARNING: we don't tell someone when they have been kicked
-		SendToAllExcept(peer, new RemovePeers(peer), true);
+		Send(new RemovePeers(peer), true);
+		MessageQueue.SendFrame((SocketPeer)peer);
 		CloseSocket((SocketPeer)peer);
 	}
 
@@ -260,16 +285,18 @@ public sealed partial class Network : IDisposable
 	{
 		if (IsHost)
 		{
+			Send<RemovePeers>(new(new Peer(0)), true);
+			MessageQueue.SendFrame();
 			foreach (Peer peer in peers.ToList())
 			{
 				CloseSocket((SocketPeer)peer);
 			}
-			Send<RemovePeers>(new(new Peer(0)), true);
 		}
 		else
 		{
 			if (c_host is null) return;
 			Send<RemovePeers>(new(new Peer((ushort)MyId!)), true);
+			MessageQueue.SendFrame();
 			CloseSocket(c_host);
 		}
 	}
@@ -344,6 +371,18 @@ public sealed partial class Network : IDisposable
 		string ip = await client.GetStringAsync("https://api.ipify.org").ConfigureAwait(false);
 
 		return IPAddress.Parse(ip);
+	}
+
+	/// <summary>
+	/// Gets the working IP Address from the local network interface
+	/// </summary>
+	/// <returns>The working private IP Address</returns>
+	/// <exception cref="InvalidOperationException" />
+	public static async Task<IPAddress> GetPrivateIP()
+	{
+		IPHostEntry host = await Dns.GetHostEntryAsync(Dns.GetHostName());
+		IPAddress[] addresses = host.AddressList;
+		return addresses.First(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && ip != IPAddress.Any && !IPAddress.IsLoopback(ip));
 	}
 
 	/// <exception cref="InvalidOperationException"></exception>

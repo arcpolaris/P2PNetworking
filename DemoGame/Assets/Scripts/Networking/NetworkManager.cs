@@ -71,8 +71,8 @@ namespace DemoGame
 			{
 				Peer peer = addition.Value;
 
-				print("new peer");
-				print(Objects.Values.Count);
+				print("new peer: " + peer.Id);
+				print("total objects: " + Objects.Values.Count);
 				foreach (NetworkObject obj in Objects.Values)
 				{
 					Network.SendTo<MakePawn>(peer, new(obj), reliable: true);

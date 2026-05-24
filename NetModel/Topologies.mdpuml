@@ -1,0 +1,85 @@
+﻿@startuml TCP vs UDP Comparison
+skinparam sequenceArrowThickness 1.5
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #888
+skinparam sequenceParticipantBackgroundColor #f5f5f5
+skinparam sequenceLifeLineBorderColor #aaa
+skinparam noteBorderColor #cc9900
+skinparam noteBackgroundColor #fffbe6
+skinparam sequenceArrowColor #333
+
+title TCP - Reliable, connection-oriented
+
+participant "Client" as C
+participant "Server" as S
+
+== Session initiation (3-way handshake) ==
+
+C -> S : SYN (seq=100)
+S -> C : SYN-ACK (seq=200, ack=101)
+C -> S : ACK (ack=201)
+
+== Data transfer ==
+
+C -> S : DATA (seq=101, len=100) [Segment 1]
+S -> C : ACK (ack=201)
+
+C -> S : DATA (seq=201, len=100) [Segment 2]
+S -> C : ACK (ack=301)
+
+== Packet loss + retransmission ==
+
+C -[#cc3333]x S : DATA (seq=301, len=100) [Segment 3 - LOST]
+
+...timeout (retransmit timer expires)...
+
+C -[#e06000]-> S : DATA (seq=301, len=100) [Segment 3 RETRANSMIT]
+S -> C : ACK (ack=401)
+
+C -> S : DATA (seq=401, len=100) [Segment 4]
+S -> C : ACK (ack=501)
+
+== Session teardown ==
+
+C -> S : FIN
+S -> C : ACK
+S -> C : FIN
+C -> S : ACK
+
+note over C, S : Connection closed
+
+@enduml
+
+@startuml UDP - Connectionless, best-effort
+
+skinparam sequenceArrowThickness 1.5
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #888
+skinparam sequenceParticipantBackgroundColor #f5f5f5
+skinparam sequenceLifeLineBorderColor #aaa
+skinparam noteBorderColor #cc9900
+skinparam noteBackgroundColor #fffbe6
+skinparam sequenceArrowColor #333
+
+title UDP - Unreliable, connectionless
+
+participant "Client" as C
+participant "Server" as S
+
+note over C, S : No handshake - sender fires immediately
+
+C -> S : DATAGRAM 1
+C -> S : DATAGRAM 2
+
+C -[#cc3333]x S : DATAGRAM 3 - LOST
+
+C -> S : DATAGRAM 4
+C -> S : DATAGRAM 5
+
+C -[#cc3333]x S : DATAGRAM 6 - LOST
+
+C -> S : DATAGRAM 7
+
+note over C, S : No teardown - sender simply stops
+
+@enduml

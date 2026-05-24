@@ -191,4 +191,11 @@ internal class UdpPeerSocket : IDisposable
 
 		return new IPEndPoint(new IPAddress(addressBytes), (port));
 	}
+
+	public async Task<IPEndpointMapping> DiscoverMapping()
+	{
+		IPEndPoint lan = new(await Network.GetPrivateIP(), ((IPEndPoint)_socket.LocalEndPoint).Port);
+		IPEndPoint wan = await STUN();
+		return new(lan, wan);
+	}
 }

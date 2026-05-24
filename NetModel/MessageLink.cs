@@ -32,6 +32,7 @@ internal partial class MessageLink
 	public SocketPeer Peer { get; init; }
 
 	public DateTime LastPing { get; set; } = DateTime.UnixEpoch;
+	public DateTime LastRecieved { get; private set; } = DateTime.UtcNow;
 
 	public void AddMessage<T>(T message, bool reliably) where T : class, IMessage
 	{
@@ -120,6 +121,7 @@ internal partial class MessageLink
 
 	private void SocketCallback(ArraySegment<byte> data)
 	{
+		LastRecieved = DateTime.UtcNow;
 		Trace.WriteLine("recv raw");
 		Packet packet = Parent.MessageRegistry.Digest(data);
 		Trace.WriteLine(packet, "recv");

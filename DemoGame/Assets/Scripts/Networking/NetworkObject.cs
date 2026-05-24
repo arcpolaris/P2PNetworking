@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using MessagePack;
 using NetModel;
 using UnityEngine;
@@ -82,6 +81,7 @@ namespace DemoGame.Networking
 		void Update()
         {
             if (!IsLocallyOwned) return;
+            if (NetworkManager.Instance.Network == null) return;
             if (NetworkManager.Instance.Network.Peers.Count == 0) return;
 
             print(NetworkManager.Instance.Network.MyId);
