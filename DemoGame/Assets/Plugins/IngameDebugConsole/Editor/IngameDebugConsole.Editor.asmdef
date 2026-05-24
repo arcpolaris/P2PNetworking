@@ -1,13 +1,11 @@
 {
-    "name": "DemoGame",
-    "rootNamespace": "",
+    "name": "IngameDebugConsole.Editor",
     "references": [
-        "com.arcpolaris.netmodel",
-        "MessagePack",
-        "MessagePack.Unity",
-        "ParrelSync"
+        "IngameDebugConsole.Runtime"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

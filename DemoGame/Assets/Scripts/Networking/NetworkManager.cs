@@ -1,4 +1,3 @@
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -12,7 +11,6 @@ using ObservableCollections;
 using ParrelSync;
 using R3;
 using UnityEngine;
-using AYellowpaper.SerializedCollections;
 using Debug = UnityEngine.Debug;
 using Network = NetModel.Network;
 
@@ -38,8 +36,8 @@ namespace DemoGame
 		public static NetworkManager Instance { get; private set; }
 
 
-		public SerializedDictionary<string, NetworkObject> Objects = new();
-		public SerializedDictionary<string, NetworkObject> Prefabs = new();
+		public Dictionary<string, NetworkObject> Objects = new();
+		public Dictionary<string, NetworkObject> Prefabs = new();
 
 		private void Awake()
 		{
