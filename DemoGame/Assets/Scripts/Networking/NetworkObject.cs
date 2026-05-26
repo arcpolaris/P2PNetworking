@@ -1,18 +1,43 @@
 using System;
+using DemoGame.Util;
 using MessagePack;
 using NetModel;
 using UnityEngine;
 
 namespace DemoGame.Networking
 {
-    public class NetworkObject : MonoBehaviour
+    public class NetworkObject : Injector
     {
-		[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-		static void ResetStatics() => injected = false;
+		protected override void Inject()
+		{
+			NetworkManager.Instance.NetworkBuilder
+				.RegisterWithForward<SetTransform>(200,
+				static (net, sender, setTransform) =>
+				{
+					if (NetworkManager.Instance.Objects.TryGetValue(setTransform.Id, out NetworkObject obj))
+					{
+						setTransform.Apply(obj.transform);
+					}
+				}
+			)
+				.RegisterWithForward<MakePawn>(201,
+				static (net, sender, makePawn) =>
+				{
+					// idempotentcy
+					if (NetworkManager.Instance.Objects.ContainsKey(makePawn.Id)) return;
+
+					NetworkObject prefab = NetworkManager.Instance.Prefabs[makePawn.Prefab];
+					NetworkObject instance = Instantiate(prefab, makePawn.Position, makePawn.Rotation);
+					instance.PawnPrefab = prefab;
+					instance.guid = makePawn.Id;
+					instance.IsLocallyOwned = false;
+					instance.ownerId = makePawn.Owner;
+					instance.BroadcastMessage("AwakePawn", SendMessageOptions.DontRequireReceiver);
+				}, reliable: true
+			);
+		}
 
 		public string guid = Guid.NewGuid().ToString();
-
-        private static bool injected;
 
         [field: SerializeField]
         public bool IsLocallyOwned { get; private set; } = true;
@@ -31,7 +56,7 @@ namespace DemoGame.Networking
 
         bool IsPrefab => PawnPrefab == this;
 
-        void Awake()
+        protected override void OnInitialize()
         {
             if (!IsPrefab)
                 guid = Guid.NewGuid().ToString();
@@ -39,43 +64,11 @@ namespace DemoGame.Networking
             NetworkManager.Instance
                 .Prefabs
                 .TryAdd(PawnPrefab.guid, PawnPrefab);
-            UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
-            if (!injected)
-            {
-                injected = true;
-                NetworkManager.Instance.NetworkBuilder
-                    .RegisterWithForward<SetTransform>(200,
-                    static (net, sender, setTransform) =>
-                    {
-                        if (NetworkManager.Instance.Objects.TryGetValue(setTransform.Id, out NetworkObject obj))
-                        {
-                            setTransform.Apply(obj.transform);
-                        }
-                    }
-                )
-                    .RegisterWithForward<MakePawn>(201,
-                    static (net, sender, makePawn) =>
-                    {
-                        // idempotentcy
-                        if (NetworkManager.Instance.Objects.ContainsKey(makePawn.Id)) return;
-
-                        NetworkObject prefab = NetworkManager.Instance.Prefabs[makePawn.Prefab];
-						UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
-						NetworkObject instance = Instantiate(prefab, makePawn.Position, makePawn.Rotation);
-                        instance.PawnPrefab = prefab;
-                        instance.guid = makePawn.Id;
-                        instance.IsLocallyOwned = false;
-                        instance.ownerId = makePawn.Owner;
-                        instance.BroadcastMessage("AwakePawn");
-                    }, reliable: true
-                );
-            }
         }
 
         void Start()
         {
             NetworkManager.Instance.Objects.Add(guid, this);
-			UnityEditor.EditorUtility.SetDirty(NetworkManager.Instance);
 		}
 
 		void Update()
@@ -84,7 +77,6 @@ namespace DemoGame.Networking
             if (NetworkManager.Instance.Network == null) return;
             if (NetworkManager.Instance.Network.Peers.Count == 0) return;
 
-            print(NetworkManager.Instance.Network.MyId);
             NetworkManager.Instance.Network.Send<SetTransform>(new(this));
         }
     }

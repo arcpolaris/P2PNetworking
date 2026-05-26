@@ -1,9 +1,13 @@
+using System.Collections.Generic;
+using DemoGame.Util;
+using MessagePack;
+using NetModel;
 using UnityEngine;
 
 namespace DemoGame
 {
-	[RequireComponent(typeof(CharacterController))]
-	public class PlayerController : MonoBehaviour
+	[RequireComponent(typeof(CharacterController)), RequireComponent(typeof(Damageable)), RequireComponent(typeof(HealthTracker))]
+	public class PlayerController : Injector, IDamageSource, IDamageable
 	{
 		[Header("Constants")]
 		[SerializeField] private Vector2 lookSpeed = new(1, 1);
@@ -16,43 +20,34 @@ namespace DemoGame
 		[Header("Objects")]
 		[SerializeField]
 		private Transform head;
+		[SerializeField]
+		private List<Transform> respawns = new();
 
 		private CharacterController ctrl;
-
-		public bool IsFocused
-		{
-			get => Cursor.lockState is CursorLockMode.Locked;
-			set
-			{
-				Cursor.visible = !value;
-				Cursor.lockState = value ? CursorLockMode.Locked : CursorLockMode.None;
-			}
-		}
+		private HealthTracker healthTracker;
+		private Damageable damageable;
 
 		Vector3 velocity;
 
-		void AwakePawn()
+		void Start()
 		{
-			this.enabled = false;
+			ctrl = GetComponent<CharacterController>();
+			healthTracker = GetComponent<HealthTracker>();
+
+			damageable = GetComponent<Damageable>();
+			damageable.OnDamaged.AddListener(OnDamaged);
+
+			healthTracker.OnDeath.AddListener(OnDeath);
 		}
 
-	    void Start()
-	    {
-			ctrl = GetComponent<CharacterController>();
-	    }
-
-	    void Update()
-	    {
-			if (Input.GetButtonDown("Cancel"))
+		void Update()
+		{
+			if (transform.position.y < -10)
 			{
-				IsFocused = false;
-			}
-			if (Input.GetMouseButtonDown(0))
-			{
-				IsFocused = true;
+				damageable.Damage(VoidDamage.Instance, 10f);
 			}
 
-			if (IsFocused)
+			if (!PauseManager.Instance.IsPaused)
 			{
 				float dx = Input.GetAxisRaw("Mouse X") * lookSpeed.x;
 				float dy = Input.GetAxisRaw("Mouse Y") * lookSpeed.y;
@@ -80,7 +75,7 @@ namespace DemoGame
 				if (Input.GetButton("Sprint")) move *= sprintMultiplier;
 				ctrl.Move(moveSpeed * Time.deltaTime * move);
 			}
-	
+
 			if (ctrl.isGrounded)
 			{
 				if (velocity.y < Mathf.Epsilon)
@@ -93,5 +88,73 @@ namespace DemoGame
 
 			ctrl.Move(Time.deltaTime * velocity);
 		}
+
+		void OnDamaged(DamageEventArgs args)
+		{
+			Debug.Log($"{args.damage} damage from {args.source.FriendlyName}");
+		}
+
+		public string FriendlyName
+		{
+			get
+			{
+				if (NetworkManager.Instance.Network == null) return "Player";
+				ushort? id = NetworkManager.Instance.Network.MyId;
+				if (id != null) return $"Player #{id}";
+				else return "Unidentified player";
+			}
+		}
+
+		public void Damage(IDamageSource source, float damage)
+		{
+			print($"damaged by {source.FriendlyName}. yeowch!");
+		}
+
+		void OnDeath(IDamageSource source)
+		{
+			Transform respawn = respawns[Random.Range(0, respawns.Count)];
+			print(respawn.position);
+			ctrl.enabled = false;
+			transform.position = respawn.position;
+			ctrl.enabled = true;
+			healthTracker.RestoreHealth();
+
+			print("killed by " + source.FriendlyName);
+			string message = FriendlyName + " killed by " + source.FriendlyName;
+
+			if (NetworkManager.Instance.Network == null) return;
+			NetworkManager.Instance.Network.Send<DeathMessage>(new(message), reliable: true);
+		}
+
+		protected override void Inject()
+		{
+			NetworkManager.Instance.NetworkBuilder.RegisterWithForward<DeathMessage>(302,
+				static (_, _, deathMessage) =>
+				{
+					Debug.Log(deathMessage.Message);
+				});
+		}
+	}
+
+	[MessagePackObject]
+	public partial class DeathMessage : IMessage
+	{
+		[Key(0)]
+		public string Message { get; private set; }
+
+		[SerializationConstructor]
+		public DeathMessage(string message)
+		{
+			Message = message;
+		}
+	}
+
+	class VoidDamage : IDamageSource
+	{
+		public string FriendlyName => "The void";
+
+		public static VoidDamage Instance = new();
+
+		private VoidDamage() { }
 	}
 }

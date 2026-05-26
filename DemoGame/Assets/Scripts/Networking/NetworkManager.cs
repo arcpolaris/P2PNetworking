@@ -1,69 +1,49 @@
-using System.Collections;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Threading.Tasks;
 using DemoGame.Networking;
+using DemoGame.Util;
+using IngameDebugConsole;
 using MessagePack;
 using MessagePack.Unity;
 using NetModel;
 using ObservableCollections;
-using ParrelSync;
 using R3;
-using UnityEngine;
 using Debug = UnityEngine.Debug;
 using Network = NetModel.Network;
 
 namespace DemoGame
 {
-	public class NetworkManager : MonoBehaviour
+	public class NetworkManager : Singleton<NetworkManager>
 	{
 		public Network.Builder NetworkBuilder { get; private set; } = Network.CreateBuilder(
 			GeneratedMessagePackResolver.Instance,
 			UnityResolver.Instance
 			);
-		public Network Network { get; private set; }
-
-		[SerializeField] bool uplinkOnStart;
-		[SerializeField] bool startAsHost;
-
-		[ContextMenuItem("Start Uplinking", nameof(BeginUplink))]
-		[ContextMenuItem("Set Remote", nameof(SetRemote))]
-		[SerializeField] string remoteEP;
+		public Network Network { get; private set; } = null;
 
 		TaskCompletionSource<IPEndPoint> remoteEPSource = new();
-
-		public static NetworkManager Instance { get; private set; }
-
+		bool awaitingEP = false;
 
 		public Dictionary<string, NetworkObject> Objects = new();
 		public Dictionary<string, NetworkObject> Prefabs = new();
 
-		private void Awake()
+		protected override void OnInitialize()
 		{
-			if (Instance)
-			{
-				Destroy(this);
-				Debug.LogErrorFormat("Only one {0} is allowed per scene", nameof(NetworkManager));
-				return;
-			}
-			Instance = this;
-			Trace.Listeners.Add(new UnityTraceListener());
+			Trace.Listeners.Add(new UnityTraceListener("sent", "recv"));
 		}
 
-		private void OnValidate()
+		private void Update()
 		{
-			if (ClonesManager.IsClone())
-			{
-				remoteEP = ClonesManager.GetArgument();
-				startAsHost = false;
-			}
-
+			if (Network == null) return;
+			Network.Update();
 		}
 
-		void Start()
+		void BuildNetwork(bool asHost)
 		{
-			Network = NetworkBuilder.Build(startAsHost);
+			Network = NetworkBuilder.Build(asHost);
 			NetworkBuilder = null;
 			Network.Peers.ObserveAdd(destroyCancellationToken).ObserveOnCurrentSynchronizationContext().Subscribe(addition =>
 			{
@@ -76,95 +56,101 @@ namespace DemoGame
 					Network.SendTo<MakePawn>(peer, new(obj), reliable: true);
 				}
 			});
+		}
 
-			StartCoroutine(NetworkRoutine());
-
-			if (uplinkOnStart)
+		async Task BeginAdmit()
+		{
+			if (awaitingEP)
 			{
-				BeginUplink();
+				Debug.LogError("Cannot start uplinking - another is in progress");
+				return;
 			}
-		}
-
-		private void OnDestroy()
-		{
-			StopAllCoroutines();
-		}
-
-		private void OnApplicationQuit()
-		{
-			StopAllCoroutines();
-		}
-
-		IEnumerator NetworkRoutine()
-		{
-			while (true)
-			{
-				Network.Update();
-				yield return null;
-			}
-		}
-
-		async void BeginUplink()
-		{
-			if (startAsHost)
+			awaitingEP = true;
+			try
 			{
 				await Network.Admit(
-					local: ep => Debug.Log(ep),
+					local: ep => Debug.Log("Admitting on: " + ep),
 					remote: remoteEPSource.Task,
-					30f
-				).ConfigureAwait(false);
+					30f);
+			} finally
+			{
+				remoteEPSource = new();
+				awaitingEP = false;
 			}
-			else
+		}
+
+		async Task BeginJoin()
+		{
+			if (awaitingEP)
+			{
+				Debug.LogError("Cannot start uplinking - another is in progress");
+				return;
+			}
+			awaitingEP = true;
+			try
 			{
 				await Network.Join(
-					local: ep => Debug.Log(ep),
+					local: ep => Debug.Log("Joining on:" + ep),
 					remote: remoteEPSource.Task,
-					30f
-				).ConfigureAwait(false);
+					30f);
+			} finally
+			{
+				remoteEPSource = new();
+				awaitingEP = false;
 			}
-			remoteEPSource = new();
-			print(Network.Peers);
 		}
 
-		void SetRemote()
+		public enum NetworkMode
 		{
-			string[] split = remoteEP.Split(':');
-			IPAddress address = IPAddress.Parse(split[0]);
+			Host = 0,
+			Client = 1
+		}
+
+		[ConsoleMethod("start", "Start the network", "mode")]
+		public static void BuildNetworkStatic(NetworkMode asHost)
+		{
+			Instance.BuildNetwork(asHost is NetworkMode.Host);
+		}
+
+		[ConsoleMethod("admit", "Begin admission of a new client")]
+		public static async void BeginAdmitStatic()
+		{
+			await Instance.BeginAdmit();
+		}
+
+		[ConsoleMethod("join", "Begin joining a host")]
+		public static async void BeginJoinStatic()
+		{
+			await Instance.BeginJoin();
+		}
+
+		[ConsoleMethod("resolve", "Resolve remote endpoint for join/uplink", "remote")]
+		public static void SetEndpoint(IPEndPoint remoteEP)
+		{
+			Instance.remoteEPSource.SetResult(remoteEP);
+		}
+
+		public static IPEndPoint ParseIPEndPoint(string epString)
+		{
+			string[] split = epString.Split(':');
+			if (split.Length != 2) throw new ArgumentException("Port must be delimited with a single ':'");
+			var address = IPAddress.Parse(split[0]);
 			int port = int.Parse(split[1]);
-			IPEndPoint endpoint = new(address, port);
-			remoteEPSource.SetResult(endpoint);
-			remoteEP = "";
-		}
-	}
-
-
-	class UnityTraceListener : TraceListener
-	{
-		public override void Write(string message)
-		{
-			Debug.Log(message);
+			return new(address, port);
 		}
 
-		public override void WriteLine(string message)
-			=> Write(message);
-
-		public override void Write(object o, string category)
+		[IngameDebugConsole.ConsoleCustomTypeParser(typeof(IPEndPoint))]
+		public static bool ParseIPEndPoint(string input, out object output)
 		{
-			Debug.LogFormat("{0}: {1}", category, o);
-		}
-
-		public override void WriteLine(object o, string category)
-			=> Write(o, category);
-
-		public override void Write(string message, string category)
-			=> Write((object)message, category);
-
-		public override void WriteLine(string message, string category)
-			=> Write((object)message, category);
-
-		public override void Fail(string message)
-		{
-			Debug.LogError(message);
+			try
+			{
+				output = ParseIPEndPoint(input);
+				return true;
+			} catch
+			{
+				output = null;
+				return false;
+			}
 		}
 	}
 }

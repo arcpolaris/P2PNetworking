@@ -5,7 +5,8 @@
         "com.arcpolaris.netmodel",
         "MessagePack",
         "MessagePack.Unity",
-        "ParrelSync"
+        "ParrelSync",
+        "IngameDebugConsole.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

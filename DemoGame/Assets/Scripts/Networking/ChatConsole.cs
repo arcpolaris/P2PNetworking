@@ -1,19 +1,16 @@
 using NetModel;
 using MessagePack;
-using UnityEngine;
+using IngameDebugConsole;
+using DemoGame.Util;
 
 namespace DemoGame.Networking
 {
-	public sealed class ChatConsole : MonoBehaviour
+	public sealed class ChatConsole : Singleton<ChatConsole>
 	{
-		[SerializeField]
-		[ContextMenuItem("Send", nameof(Send))]
-		private string prompt = "";
-
-		private void Awake()
+		protected override void OnInitialize()
 		{
-			NetworkManager.Instance.NetworkBuilder.Register<TextMessage>(100, static (net, sender, text) =>
-			{
+			NetworkManager.Instance.NetworkBuilder.Register<TextMessage>(100,
+				static (net, sender, text) => {
 				print($"[{sender.Id}]: {text.Text}");
 				net.SendToAllExcept<IndirectTextMessage>(sender, new(sender, text));
 			}, static (_, sender, text) =>
@@ -23,7 +20,8 @@ namespace DemoGame.Networking
 			);
 		}
 
-		void Send()
+		[ConsoleMethod("say", "Sends a text message to the room", "message")]
+		public static void Send(string prompt)
 		{
 			NetworkManager.Instance.Network.Send(new TextMessage(prompt), reliable: true);
 		}
