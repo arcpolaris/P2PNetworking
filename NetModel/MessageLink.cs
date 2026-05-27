@@ -43,7 +43,6 @@ internal partial class MessageLink
 	public void ProcessFrame()
 	{
 		var packets = JitterBuffer.Consume();
-		Trace.WriteLine(packets.Count, "jitter consume");
 		foreach (Packet packet in packets)
 		{
 			if (packet.IsReliable)
@@ -111,17 +110,20 @@ internal partial class MessageLink
 			AddPending(packet);
 		}
 
+#if DEBUG
 		Trace.WriteLine($"{packet} - {string.Join(' ', digest.Select(b => b.ToString("X2")))}", "sent");
+#endif
 		Packet debug = Parent.MessageRegistry.Digest(digest);
 	}
 
 
-	private void SocketCallback(ArraySegment<byte> data)
+	private void SocketCallback(ReadOnlyMemory<byte> data)
 	{
 		LastRecieved = DateTime.UtcNow;
-		Trace.WriteLine("recv raw");
 		Packet packet = Parent.MessageRegistry.Digest(data);
+#if DEBUG
 		Trace.WriteLine(packet, "recv");
+#endif
 		// if Sequence got this high naturally i don't care
 		if (packet is null or { Sequence: -1 }) return;
 

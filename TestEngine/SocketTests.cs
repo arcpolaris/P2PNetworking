@@ -24,7 +24,7 @@ public sealed class SocketTests
         using UdpPeerSocket sock2 = new();
 
 		sock2.OnFrameReceived += data => sock2.Send(data.ToArray());
-		sock1.OnFrameReceived += data => garbageOut.Add([.. data]);
+		sock1.OnFrameReceived += data => garbageOut.Add(data.ToArray());
 
         sock1.Bind(33333);
         sock2.Bind(33334);
@@ -100,7 +100,7 @@ public sealed class SocketTests
         sock.OnFrameReceived += data =>
         {
 
-			if (data.AsSpan().SequenceEqual(punch_probe))
+			if (data.Span.SequenceEqual(punch_probe))
 			{
 				Debug.WriteLine("punch got through!!");
 				return;

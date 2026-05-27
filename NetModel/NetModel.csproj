@@ -14,7 +14,7 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 
-		<PackageReference Include="MessagePack" Version="3.1.4" />
+		<PackageReference Include="MessagePack" Version="3.1.4" PrivateAssets="Analyzers"/>
 		<PackageReference Include="ObservableCollections" Version="3.3.4" />
 
 	</ItemGroup>

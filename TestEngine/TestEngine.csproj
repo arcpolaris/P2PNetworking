@@ -12,4 +12,8 @@
     <ProjectReference Include="..\NetModel\NetModel.csproj" />
   </ItemGroup>
 
+    <PropertyGroup>
+	    <NoWarn>$(NoWarn);CS0436</NoWarn>
+    </PropertyGroup>
+
 </Project>

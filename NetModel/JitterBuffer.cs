@@ -55,7 +55,9 @@ internal class JitterBuffer
 
 		// at this point we *should* only be one over cap
 		int drop = buffer.FindIndex(static p => !p.IsReliable);
+#if DEBUG
 		Trace.WriteLine(buffer[drop]);
+#endif
 		buffer.RemoveAt(drop);
 	}
 
@@ -75,8 +77,6 @@ internal class JitterBuffer
 	/// </returns>
 	public List<Packet> Consume()
 	{
-		Trace.WriteLine(queue.Count, "queue count jitter");
-		Trace.WriteLine(buffer.Count, "buffer count jitter");
 		Drain();
 
 		var res = buffer.TakeWhile(p => p.IsReliable).ToList();

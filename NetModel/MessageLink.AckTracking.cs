@@ -22,6 +22,7 @@ internal partial class MessageLink
 		{
 			if ((bitfield & (1u << i)) == 0) continue;
 
+			// TODO: use binary search here
 			var packet = pending.SingleOrDefault(p => p.Sequence == sequence - i);
 			if (packet == null) continue;
 			pending.Remove(packet);

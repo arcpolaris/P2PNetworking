@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -12,7 +13,7 @@ namespace NetModel;
 
 internal class UdpPeerSocket : IDisposable
 {
-	public const int max_packet_size = 1024;
+	public const int max_packet_size = 2048;
 	internal Socket _socket;
 
 	private bool _disposed = false;
@@ -111,11 +112,11 @@ internal class UdpPeerSocket : IDisposable
 	public async Task StartPolling()
 	{
 		while (!_disposed) {
-			byte[] buffer = new byte[2048];
+			using IMemoryOwner<byte> buffer = MemoryPool<byte>.Shared.Rent(max_packet_size);
 			int read;
 			try
 			{
-				read = await Task.Run(() => _socket.Receive(buffer)).ConfigureAwait(false);
+				read = await Task.Run(() => _socket.Receive(buffer.Memory.Span)).ConfigureAwait(false);
 			}
 			catch (OperationCanceledException) { break; }
 			catch (ObjectDisposedException) { break; }
@@ -130,14 +131,13 @@ internal class UdpPeerSocket : IDisposable
 				Trace.Fail(e.Message);
 				throw e;
 			}
-			ArraySegment<byte> segment = new(buffer, 0, read);
-			Trace.WriteLine($"{OnFrameReceived?.GetInvocationList().Length ?? 0}", "handlerCount");
-			OnFrameReceived?.Invoke(segment);
+
+			OnFrameReceived?.Invoke(buffer.Memory[..read]);
 		}
 		Trace.WriteLine("Polling loop exited");
 	}
 
-	public event Action<ArraySegment<byte>>? OnFrameReceived;
+	public event Action<ReadOnlyMemory<byte>>? OnFrameReceived;
 
 	public async Task<IPEndPoint> STUN()
 	{

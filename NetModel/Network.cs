@@ -102,7 +102,7 @@ public sealed partial class Network : IDisposable
 	{
 		if (SynchronizationContext.Current is SynchronizationContext syncCtx)
 		{
-			Trace.WriteLine(syncCtx.GetType().Name, "info");
+			Trace.WriteLine(syncCtx.GetType().Name, "sync context");
 		}
 
 		UdpPeerSocket socket = new();
@@ -125,7 +125,7 @@ public sealed partial class Network : IDisposable
 		DateTime cancelLastSet = DateTime.UtcNow;
 		TimeSpan remainingTime = TimeSpan.FromSeconds(punchTimeout);
 
-		void TempMessageHandler(ArraySegment<byte> data)
+		void TempMessageHandler(ReadOnlyMemory<byte> data)
 		{
 			Packet packet = MessageRegistry.Digest(data);
 

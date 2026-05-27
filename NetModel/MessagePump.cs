@@ -60,7 +60,9 @@ internal class MessagePump(Network network)
 		if (peer is null) throw new ArgumentNullException(nameof(peer));
 		if (peer is not SocketPeer) throw new ArgumentException("Cannot invoke on indirect remote peer");
 		if (!links.TryGetValue(peer.Id, out MessageLink link)){
+#if DEBUG
 			Trace.Fail($"No link for {peer.Id} in [{string.Join(", ", links.Keys)}]");
+#endif
 			throw new KeyNotFoundException($"Cannot access data for Peer {peer.Id}");
 		}
 		return DateTime.UtcNow - link.LastRecieved;

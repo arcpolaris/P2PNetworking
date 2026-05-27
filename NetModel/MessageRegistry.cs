@@ -72,7 +72,7 @@ internal class MessageRegistry
 		return MessagePackSerializer.Serialize<Packet>(packet, serializerOptions);
 	}
 
-	internal Packet Digest(ArraySegment<byte> bytes)
+	internal Packet Digest(ReadOnlyMemory<byte> bytes)
 	{
 		return MessagePackSerializer.Deserialize<Packet>(bytes, serializerOptions);
 	}
