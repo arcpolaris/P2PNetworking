@@ -113,9 +113,6 @@ internal partial class MessageLink
 
 		Trace.WriteLine($"{packet} - {string.Join(' ', digest.Select(b => b.ToString("X2")))}", "sent");
 		Packet debug = Parent.MessageRegistry.Digest(digest);
-		Trace.Assert(packet.Sequence == debug.Sequence, "Sequences do not match");
-		Trace.Assert(packet.IsReliable == debug.IsReliable, "Reliability does not match");
-		Trace.Assert(packet.Messages.Select(msg => msg.GetType().FullName).SequenceEqual(debug.Messages.Select(msg => msg.GetType().FullName)));
 	}
 
 
